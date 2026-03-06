@@ -19,7 +19,7 @@ OCISigner is a Burp Suite extension for signing OCI HTTP requests using API Key,
 
 Requirements:
 - Burp Suite (Montoya API compatible)
-- Java 21 for local builds
+- Java 25 for local builds
 
 ### Option 1: Install from GitHub Releases
 1. Download the latest `OCISigner-*-all.jar` from:
