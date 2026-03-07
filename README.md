@@ -6,7 +6,7 @@
 ![Issues](https://img.shields.io/github/issues/NetSPI/OCISigner.svg)
 ![Forks](https://img.shields.io/github/forks/NetSPI/OCISigner.svg)
 ![Stars](https://img.shields.io/github/stars/NetSPI/OCISigner.svg)
-![Java](https://img.shields.io/badge/java-25-informational)
+![Java](https://img.shields.io/badge/java-21-informational)
 ![Burp](https://img.shields.io/badge/burp-montoya%202026.2-blue)
 
 ## Overview
@@ -22,11 +22,13 @@ OCISigner is a Burp Suite extension for signing OCI HTTP requests using API Key,
 
 Requirements:
 - Burp Suite (Montoya API compatible)
-- Java 25 for local builds
+- Java 21+ for local builds (default minimum target is Java 21)
+- Release artifacts may include JDK 25 builds; use a lower-target jar (for example JDK 21) if your Burp runtime is older.
 
 ### Option 1: Install from GitHub Releases
-1. Download the latest `OCISigner-*-all.jar` from:
+1. Download the latest release jar matching your runtime from:
    - https://github.com/NetSPI/OCISigner/releases
+   - Example: use `*-jdk25.jar` if Burp runs on Java 25; use `*-jdk21.jar` if Burp runs on Java 21.
 2. In Burp Suite, go to `Extensions` -> `Installed` -> `Add`.
 3. Set `Extension type` to `Java` and select the downloaded jar.
 
@@ -90,7 +92,7 @@ Review the GitHub wiki for each profile auth method and how you would normally r
 | `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.81.0` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
 | `com.fasterxml.jackson.core:jackson-databind:2.21.1` | Token parsing + JWT helpers | JSON parsing for token responses and JWT claim extraction. |
 | `org.junit.jupiter:junit-jupiter:6.0.3`* | Unit tests only | JUnit 5 test framework (unit tests and assertions). |
-| `org.slf4j:slf4j-simple:1.7.33`* | Unit tests only | SLF4J binding to show logs during tests. |
+| `org.slf4j:slf4j-simple:2.0.17`* | Unit tests only | SLF4J binding to show logs during tests. |
 
 *Test-scoped dependency.
 
