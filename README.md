@@ -15,6 +15,9 @@
 
 OCISigner is a Burp Suite extension for signing OCI HTTP requests using API Key, Session Token, Config Profile (auto), Instance Principal (X.509), and Resource Principal (RPST) authentication methods. It supports SDK signing where possible and manual signing where the SDK is too restrictive for off-host use cases.
 
+![Dashboard](Dashboard.png)
+![ContextMenu](ContextMenu.png)
+
 ## Installation
 
 Requirements:
