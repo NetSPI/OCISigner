@@ -49,6 +49,7 @@ Requirements:
 2. Toggle "Update timestamp" to automatically update the timestsamp for any date or x-date headers
 3. Toggle "Only sign if Authorization exists" to only sign incoming HTTP requests that have an Authorization header. Helpful if you don't want ot sign requests going to other hosts that don't already have OCI auth.
 4. "Test Credentials" will send a GetNamespace (/n/) API request to the region supplied to validate the creds supplied are valid. Per OCI documentation [here](https://docs.oracle.com/en-us/iaas/Content/Identity/policyreference/objectstoragepolicyreference.htm) (shown below) GetNamespace does **NOT REQUIRE AUTHORIZATION** making it a good endpoint to validate creds are working regardless of permissions.
+     - **Note**: The Instance Profile authentication method is a bit of an exception. It will still call the /n/ API but will make a call to /v1/x509 before that call to generate the session token for future requests. Per the UI instructions you can point this to your current proxy to see that x509 request in your Logger tab when you click "Test Credentials".
 
 ## Notable Signing Notes
 Reference:
