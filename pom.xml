@@ -31,7 +31,7 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk18on</artifactId>
-            <version>1.83</version>
+            <version>1.84</version>
         </dependency>
         <!-- OCI Java SDK (shaded "full" distro) for supported request signing + instance principals -->
         <dependency>
