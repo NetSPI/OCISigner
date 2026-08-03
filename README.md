@@ -7,7 +7,7 @@
 ![Forks](https://img.shields.io/github/forks/NetSPI/OCISigner.svg)
 ![Stars](https://img.shields.io/github/stars/NetSPI/OCISigner.svg)
 ![Java](https://img.shields.io/badge/java-21-informational)
-![Burp](https://img.shields.io/badge/burp-montoya%202026.2-blue)
+![Burp](https://img.shields.io/badge/burp-montoya%202026.7-blue)
 
 ## Overview
 
@@ -60,12 +60,12 @@ Requirements:
 ## Screenshots
 
 <p align="center" style="margin: 0.35em 0 0 0;">
-  <img src="./Dashboard.png" alt="Dashboard" />
+  <img src="./assets/Dashboard.png" alt="Dashboard" />
 </p>
 <p align="center" style="margin: 0.15em 0 1em 0;"><em>Figure 1. OCISigner Burp Suite Tab.</em></p>
 
 <p align="center" style="margin: 0.35em 0 0 0;">
-  <img src="./ContextMenu.png" alt="ContextMenu" />
+  <img src="./assets/ContextMenu.png" alt="ContextMenu" />
 </p>
 <p align="center" style="margin: 0.15em 0 1em 0;"><em>Figure 2. OCISigner Tab in Extensions Menu Item.</em></p>
 
@@ -73,13 +73,13 @@ Requirements:
 
 | Dependency | Where Used | Purpose |
 |---|---|---|
-| `net.portswigger.burp.extensions:montoya-api:2026.2` | Burp extension entrypoint + UI panels + request hooks | Burp Suite extension API (UI, request handling, proxy integration). |
-| `org.bouncycastle:bcprov-jdk18on:1.83` | Key parsing + crypto primitives | PEM and RSA key handling for signing. |
-| `org.bouncycastle:bcpkix-jdk18on:1.83` | X.509 handling | Certificate parsing and chain handling for instance principal federation. |
-| `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.81.0` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
-| `com.fasterxml.jackson.core:jackson-databind:2.21.1` | Token parsing + JWT helpers | JSON parsing for token responses and JWT claim extraction. |
-| `org.junit.jupiter:junit-jupiter:6.0.3`* | Unit tests only | JUnit 5 test framework (unit tests and assertions). |
-| `org.slf4j:slf4j-simple:2.0.17`* | Unit tests only | SLF4J binding to show logs during tests. |
+| `net.portswigger.burp.extensions:montoya-api:2026.7` | Burp extension entrypoint + UI panels + request hooks | Burp Suite extension API (UI, request handling, proxy integration). |
+| `org.bouncycastle:bcprov-jdk18on:1.85` | Key parsing + crypto primitives | PEM and RSA key handling for signing. |
+| `org.bouncycastle:bcpkix-jdk18on:1.85` | X.509 handling | Certificate parsing and chain handling for instance principal federation. |
+| `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.93.0` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
+| `tools.jackson.core:jackson-databind:3.2.1` | Token parsing + JWT helpers | JSON parsing for token responses and JWT claim extraction (Jackson 3; `jackson-annotations` stays on the legacy `com.fasterxml.jackson.core` group upstream). |
+| `org.junit.jupiter:junit-jupiter:6.1.2`* | Unit tests only | JUnit 5 test framework (unit tests and assertions). |
+| `org.slf4j:slf4j-simple:2.0.18`* | Unit tests only | SLF4J binding to show logs during tests. |
 
 *Test-scoped dependency.
 
