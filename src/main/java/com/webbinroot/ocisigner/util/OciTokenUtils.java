@@ -1,7 +1,7 @@
 package com.webbinroot.ocisigner.util; // Package namespace for utility helpers.
 
-import com.fasterxml.jackson.databind.JsonNode; // Jackson JSON node type for parsing token JSON.
-import com.fasterxml.jackson.databind.ObjectMapper; // Jackson object mapper used to parse JSON.
+import tools.jackson.databind.JsonNode; // Jackson JSON node type for parsing token JSON.
+import tools.jackson.databind.ObjectMapper; // Jackson object mapper used to parse JSON.
 
 import java.io.IOException; // Exception for file IO in ensureTokenFile.
 import java.nio.charset.StandardCharsets; // Charset for reading/writing token files.
@@ -46,8 +46,8 @@ public final class OciTokenUtils { // Utility class (static-only).
             try { // parse and extract "token" field.
                 JsonNode node = MAPPER.readTree(trimmed); // Parse JSON.
                 JsonNode token = node.get("token"); // Get "token" field.
-                if (token != null && token.isTextual()) { // If it's a string,
-                    return token.asText().trim(); // return its trimmed value.
+                if (token != null && token.isString()) { // If it's a string,
+                    return token.asString().trim(); // return its trimmed value.
                 }
             } catch (Exception ignored) {} // Ignore JSON parse failures.
         }

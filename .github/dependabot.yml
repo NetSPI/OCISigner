@@ -7,6 +7,26 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    groups:
+      # bcprov/bcpkix/bcutil must move together: bcpkix's POM pins an
+      # exact-matching bcutil version which pins the same bcprov version, and
+      # a lone bcpkix (or bcprov) bump silently skews that pairing. Force them
+      # into one PR so they're never merged separately.
+      bouncycastle:
+        patterns:
+          - "org.bouncycastle:*"
+      # Everything else: batch routine minor/patch bumps to cut review churn.
+      # Majors intentionally fall out of the group into their own PR for
+      # individual scrutiny (a new montoya-api/oci-sdk/junit major can break
+      # the build or the signing API surface).
+      maven-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "org.bouncycastle:*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -14,3 +34,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    groups:
+      # Pinned GitHub Actions (Dependabot bumps the commit SHA; it does NOT
+      # update the preceding "# vX.Y.Z" comment, so re-check/fix those by hand
+      # when merging). Action updates are low-risk, so batch them into one PR.
+      github-actions:
+        patterns:
+          - "*"

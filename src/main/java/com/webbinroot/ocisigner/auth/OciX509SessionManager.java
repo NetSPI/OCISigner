@@ -1,7 +1,7 @@
 package com.webbinroot.ocisigner.auth;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.oracle.bmc.auth.X509CertificateSupplier;
 import com.webbinroot.ocisigner.keys.OciX509Suppliers;
 import com.webbinroot.ocisigner.model.Profile;
@@ -355,8 +355,8 @@ public final class OciX509SessionManager {
         try {
             JsonNode node = MAPPER.readTree(body);
             JsonNode token = node.get("token");
-            if (token != null && token.isTextual()) {
-                return token.asText();
+            if (token != null && token.isString()) {
+                return token.asString();
             }
         } catch (Exception ignored) {}
         int idx = body.indexOf("\"token\"");
