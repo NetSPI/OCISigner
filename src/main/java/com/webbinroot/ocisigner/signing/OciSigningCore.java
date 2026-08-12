@@ -1,11 +1,16 @@
 package com.webbinroot.ocisigner.signing;
 
 import com.webbinroot.ocisigner.model.ManualSigningSettings;
+import com.webbinroot.ocisigner.util.OciTokenUtils;
 
-import java.security.MessageDigest;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.BODY_ALLOWED;
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.first;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.isBlank;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
 
 /**
  * Shared signing normalization and signing-string construction.
@@ -17,10 +22,6 @@ import java.util.*;
  *  - signing string assembly
  */
 public final class OciSigningCore {
-
-    public enum BodyHeaderPolicy {
-        INCLUDE_PRESENT
-    }
 
     public static final class Prepared {
         public final String methodUpper;
@@ -48,7 +49,6 @@ public final class OciSigningCore {
         }
     }
 
-    private static final Set<String> BODY_ALLOWED = Set.of("POST", "PUT", "PATCH");
     private static final DateTimeFormatter RFC1123 = DateTimeFormatter.RFC_1123_DATE_TIME;
 
     private OciSigningCore() {}
@@ -61,7 +61,7 @@ public final class OciSigningCore {
                                    byte[] bodyBytes,
                                    boolean objectStoragePut,
                                    boolean addDateIfSigning,
-                                   BodyHeaderPolicy bodyHeaderPolicy) {
+                                   String delegationToken) {
 
         // Example input:
         //   method="GET", requestTarget="/n/", headersIn={"host":["objectstorage..."]}
@@ -101,6 +101,16 @@ public final class OciSigningCore {
             headers.put("date", List.of(dateVal));
         }
 
+        // Delegation (OBO) token: always overwrite (not "only if missing" like host/date
+        // above) so the Profile's configured value wins over any stale opc-obo-token
+        // header already sitting on a Repeater-resent request -- otherwise we could sign
+        // over one value while a different, stale value physically goes out on the wire.
+        String deleg = nz(delegationToken);
+        if (!deleg.isBlank()) {
+            apply.put("opc-obo-token", deleg);
+            headers.put("opc-obo-token", List.of(deleg));
+        }
+
         String xcsVal = first(headers.get("x-content-sha256"));
         String clVal = first(headers.get("content-length"));
         String ctVal = first(headers.get("content-type"));
@@ -109,7 +119,7 @@ public final class OciSigningCore {
             if (settings.signXContentSha256) {
                 if (isBlank(xcsVal)) {
                     if (settings.computeMissingXContentSha256) {
-                        xcsVal = base64Sha256(effectiveBodyBytes);
+                        xcsVal = OciTokenUtils.base64Sha256(effectiveBodyBytes);
                         apply.put("x-content-sha256", xcsVal);
                         headers.put("x-content-sha256", List.of(xcsVal));
                     } else {
@@ -141,6 +151,7 @@ public final class OciSigningCore {
         if (settings.signRequestTarget) headersToSign.add("(request-target)");
         if (settings.signDate) headersToSign.add(isBlank(first(headers.get("x-date"))) ? "date" : "x-date");
         if (settings.signHost) headersToSign.add("host");
+        if (!deleg.isBlank()) headersToSign.add("opc-obo-token");
 
         if (considerBody && !objectStoragePut) {
             if (settings.signXContentSha256) headersToSign.add("x-content-sha256");
@@ -148,7 +159,7 @@ public final class OciSigningCore {
             if (settings.signContentLength) headersToSign.add("content-length");
         }
 
-        if (objectStoragePut && bodyHeaderPolicy == BodyHeaderPolicy.INCLUDE_PRESENT) {
+        if (objectStoragePut) {
             if (!isBlank(xcsVal)) headersToSign.add("x-content-sha256");
             if (!isBlank(ctVal)) headersToSign.add("content-type");
             if (!isBlank(clVal)) headersToSign.add("content-length");
@@ -200,26 +211,4 @@ public final class OciSigningCore {
         return sb.toString();
     }
 
-    private static String base64Sha256(byte[] data) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(data);
-            return Base64.getEncoder().encodeToString(digest);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("SHA-256 failed: " + e.getMessage(), e);
-        }
-    }
-
-    private static String first(List<String> vals) {
-        if (vals == null || vals.isEmpty()) return null;
-        return vals.get(0);
-    }
-
-    private static boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
-    }
-
-    private static String nz(String s) {
-        return (s == null) ? "" : s.trim();
-    }
 }

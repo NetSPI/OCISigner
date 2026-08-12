@@ -7,6 +7,10 @@ import com.webbinroot.ocisigner.keys.OciX509Suppliers;
 import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.util.OciTokenUtils;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.cachePart;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.isBlank;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
@@ -73,9 +77,28 @@ public final class OciX509SessionManager {
     private static final ConcurrentHashMap<String, SessionInfo> CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, HttpClient> HTTP_CLIENT_CACHE = new ConcurrentHashMap<>();
     private static final CopyOnWriteArrayList<BiConsumer<Profile, SessionInfo>> LISTENERS = new CopyOnWriteArrayList<>();
-    private static final long REFRESH_SKEW_SEC = 120;
+    // Package-private (not private): shared with OciRpstSessionManager, which
+    // reuses this same SessionInfo type for RPST caching.
+    static final long REFRESH_SKEW_SEC = 120;
 
     private OciX509SessionManager() {}
+
+    /**
+     * Drop all cached session tokens/keys and listeners, and close the pooled
+     * federation HttpClients. Called on extension unload.
+     */
+    public static void clear() {
+        CACHE.clear();
+        LISTENERS.clear();
+        for (HttpClient client : HTTP_CLIENT_CACHE.values()) {
+            try {
+                client.close();
+            } catch (Exception ignored) {
+                // Best-effort on unload.
+            }
+        }
+        HTTP_CLIENT_CACHE.clear();
+    }
 
     /**
      * True if leaf cert + key inputs are present.
@@ -209,13 +232,6 @@ public final class OciX509SessionManager {
         if (listener != null) LISTENERS.add(listener);
     }
 
-    /**
-     * Remove a previously registered listener.
-     */
-    public static void removeListener(BiConsumer<Profile, SessionInfo> listener) {
-        if (listener != null) LISTENERS.remove(listener);
-    }
-
     private static void notifyListeners(Profile p, SessionInfo s) {
         for (BiConsumer<Profile, SessionInfo> l : LISTENERS) {
             try {
@@ -226,14 +242,13 @@ public final class OciX509SessionManager {
 
     private static void cacheOnProfile(Profile p, SessionInfo s) {
         if (p == null || s == null) return;
-        try {
-            p.cachedSessionToken = (s.token == null) ? "" : s.token;
-            p.cachedSessionTokenExp = s.expEpochSec;
-            p.cachedSessionTokenUpdatedAt = s.refreshedAtEpochSec;
-        } catch (Exception ignored) {}
+        p.cachedSessionToken = (s.token == null) ? "" : s.token;
+        p.cachedSessionTokenExp = s.expEpochSec;
+        p.cachedSessionTokenUpdatedAt = s.refreshedAtEpochSec;
     }
 
-    private static boolean isExpiredSoon(SessionInfo info) {
+    // Package-private (not private): shared with OciRpstSessionManager.
+    static boolean isExpiredSoon(SessionInfo info) {
         if (info == null) return true;
         long now = Instant.now().getEpochSecond();
         return (info.expEpochSec - now) <= REFRESH_SKEW_SEC;
@@ -262,7 +277,7 @@ public final class OciX509SessionManager {
         String date = DateTimeFormatter.RFC_1123_DATE_TIME.format(
                 ZonedDateTime.now(java.time.ZoneOffset.UTC)
         );
-        String contentSha256 = base64Sha256(bodyBytes);
+        String contentSha256 = OciTokenUtils.base64Sha256(bodyBytes);
         String requestTarget = "post /v1/x509";
         String signingString =
                 "date: " + date + "\n" +
@@ -397,11 +412,6 @@ public final class OciX509SessionManager {
         return base64(sig.sign());
     }
 
-    private static String base64Sha256(byte[] data) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        return base64(md.digest(data));
-    }
-
     private static String base64(byte[] data) {
         return Base64.getEncoder().encodeToString(data);
     }
@@ -417,7 +427,9 @@ public final class OciX509SessionManager {
         return sb.toString();
     }
 
-    private static SSLContext insecureSslContext() {
+    // Package-private (not private): shared with OciCrypto, which uses the same
+    // insecure-TLS opt-in for its SDK-based federation path.
+    static SSLContext insecureSslContext() {
         try {
             TrustManager[] trustAll = new TrustManager[] {
                     new X509TrustManager() {
@@ -435,17 +447,21 @@ public final class OciX509SessionManager {
             sc.init(null, trustAll, new java.security.SecureRandom());
             return sc;
         } catch (Exception e) {
+            com.webbinroot.ocisigner.util.OciDebug.logStack("[OCI Signer][Federation] Failed to init insecure SSL context", e);
             return null;
         }
     }
 
-    private static String federationEndpointFromRegion(String region) {
+    // Package-private (not private): shared with OciCrypto (identical formula for
+    // both the manual-federation and SDK-based federation paths).
+    static String federationEndpointFromRegion(String region) {
         String r = nz(region);
         if (r.isBlank()) return "";
         return "https://auth." + r + ".oraclecloud.com";
     }
 
-    private static String normalizeFederationEndpoint(String endpoint) {
+    // Package-private (not private): shared with OciCrypto.
+    static String normalizeFederationEndpoint(String endpoint) {
         String e = nz(endpoint);
         if (e.isBlank()) return e;
         try {
@@ -457,12 +473,23 @@ public final class OciX509SessionManager {
             StringBuilder base = new StringBuilder();
             base.append(scheme).append("://").append(host);
             if (port > 0) base.append(":").append(port);
+
+            String path = uri.getPath();
+            if (path != null && !path.isBlank() && !"/".equals(path)) {
+                com.webbinroot.ocisigner.util.OciDebug.debug("[OCI Signer][Federation] Normalized endpoint (strip path '" + path + "') -> " + base);
+            }
             return base.toString();
         } catch (Exception ignored) {
             return e;
         }
     }
 
+    // Deliberately excludes federationProxy*/federationInsecureTls: those control how
+    // the federation endpoint is *reached* (HTTP_CLIENT_CACHE is keyed on them
+    // separately, in httpClient() below), not whether an already-issued token/private
+    // key pair is still valid to sign with. Including them here meant toggling e.g.
+    // "Disable TLS verify (federation)" silently orphaned a perfectly good cached
+    // token, forcing an unnecessary re-federation.
     private static String cacheKey(Profile p) {
         StringBuilder sb = new StringBuilder();
         sb.append("IP|");
@@ -470,18 +497,8 @@ public final class OciX509SessionManager {
         sb.append(cachePart(p.instanceX509LeafKey)).append("|");
         sb.append(cachePart(p.instanceX509IntermediateCerts)).append("|");
         sb.append(nz(p.instanceX509FederationEndpoint)).append("|");
-        sb.append(nz(p.instanceX509TenancyOcid)).append("|");
-        sb.append(p.federationProxyEnabled).append("|");
-        sb.append(nz(p.federationProxyHost)).append("|");
-        sb.append(p.federationProxyPort).append("|");
-        sb.append(p.federationInsecureTls);
+        sb.append(nz(p.instanceX509TenancyOcid));
         return sb.toString();
-    }
-
-    private static String cachePart(String s) {
-        String v = nz(s);
-        if (v.isBlank()) return "";
-        return "hash:" + Integer.toHexString(v.hashCode()) + ":" + v.length();
     }
 
     private static String truncate(String s, int max) {
@@ -491,20 +508,11 @@ public final class OciX509SessionManager {
     }
 
     private static void logInfo(Consumer<String> log, String msg) {
-        if (log != null && msg != null) log.accept(msg);
+        com.webbinroot.ocisigner.util.OciDebug.logTo(log, msg);
     }
 
     private static void logError(Consumer<String> errorLog, Consumer<String> infoLog, String msg, Throwable t) {
-        String detail = (t == null) ? "" : (" :: " + t.getClass().getSimpleName() + ": " + t.getMessage());
-        if (errorLog != null) errorLog.accept(msg + detail);
-        if (infoLog != null) infoLog.accept(msg + detail);
+        com.webbinroot.ocisigner.util.OciDebug.logErrorTo(errorLog, infoLog, msg, t);
     }
 
-    private static boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
-    }
-
-    private static String nz(String s) {
-        return (s == null) ? "" : s.trim();
-    }
 }

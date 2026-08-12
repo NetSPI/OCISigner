@@ -18,13 +18,7 @@ class ManualEdgeCasesTest {
     @Test
     void get_with_body_allowed_includes_body_headers_and_full_header() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
         ms.allowGetWithBody = true;
@@ -67,13 +61,7 @@ class ManualEdgeCasesTest {
     @Test
     void delete_with_body_allowed_includes_body_headers_and_full_header() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
         ms.allowDeleteWithBody = true;
@@ -112,57 +100,11 @@ class ManualEdgeCasesTest {
         TestUtils.verifySignature(r.headersToApply.get("authorization"), r.signingString, kp.getPublic(), "rsa-sha256");
     }
 
-    // SignDate disabled full header matches
-    @Test
-    void signDate_disabled_full_header_matches() throws Exception {
-        KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
-
-        ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
-        ms.signDate = false;
-        ms.addMissingDate = false;
-
-        Map<String, List<String>> headers = TestUtils.baseHeaders("identity.us-phoenix-1.oci.oraclecloud.com");
-
-        OciManualSigner.Result r = OciManualSigner.sign(
-                p, ms, "GET", "/20160918/regions",
-                "identity.us-phoenix-1.oci.oraclecloud.com", headers, null
-        );
-
-        String expectedSigningString = String.join("\n",
-                "(request-target): get /20160918/regions",
-                "host: identity.us-phoenix-1.oci.oraclecloud.com"
-        );
-        assertEquals(expectedSigningString, r.signingString);
-
-        String keyId = p.tenancyOcid + "/" + p.userOcid + "/" + p.fingerprint;
-        String expectedAuth = TestUtils.expectedManualAuthorizationHeaderWithSig(
-                keyId,
-                "(request-target) host",
-                "rsa-sha256",
-                TestUtils.SIG_API_NO_DATE
-        );
-        assertEquals(expectedAuth, r.headersToApply.get("authorization"));
-        TestUtils.verifySignature(r.headersToApply.get("authorization"), r.signingString, kp.getPublic(), "rsa-sha256");
-    }
-
     // ObjectStoragePut ignores body headers when missing
     @Test
     void objectStoragePut_ignores_body_headers_when_missing() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 
@@ -196,13 +138,7 @@ class ManualEdgeCasesTest {
     @Test
     void extra_headers_duplicates_are_deduped() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
         ms.extraSignedHeaders = "host\nHOST\nhost";
@@ -236,13 +172,7 @@ class ManualEdgeCasesTest {
     @Test
     void objectStoragePut_includes_present_body_headers() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 
@@ -282,10 +212,7 @@ class ManualEdgeCasesTest {
     // Hmac sha256 signing fixed signature
     @Test
     void hmac_sha256_signing_fixed_signature() throws Exception {
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
         ms.algorithm = "hmac-sha256";

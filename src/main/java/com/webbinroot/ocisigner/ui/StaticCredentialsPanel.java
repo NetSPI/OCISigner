@@ -6,13 +6,13 @@ import com.webbinroot.ocisigner.model.ManualSigningSettings;
 import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.model.ProfileStore;
 import com.webbinroot.ocisigner.model.SigningMode;
+import com.webbinroot.ocisigner.util.OciDebug;
 import com.webbinroot.ocisigner.util.OciTokenUtils;
 import com.webbinroot.ocisigner.auth.OciX509SessionManager;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.io.File;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -21,7 +21,7 @@ import java.util.Objects;
 /**
  * UI panel for all static credential inputs (API key, session token, X509, RPST).
  */
-public class StaticCredentialsPanel {
+public final class StaticCredentialsPanel {
 
     private final JPanel root;
 
@@ -75,6 +75,9 @@ public class StaticCredentialsPanel {
     private final JTextField instanceTokenCreated = new JTextField();
     private final JButton refreshInstanceToken = new JButton("Refresh Token");
     private final TokenField instanceTokenField = new TokenField(5, false, false);
+    // Delegation (OBO) token: optional add-on, Instance Principal only (Oracle's SDKs
+    // only ship a dedicated delegation signer for instance principals).
+    private final TokenField instanceDelegationTokenField = new TokenField(4, true, true);
 
     // Resource Principal (explicit inputs)
     private final JPanel resourcePrincipalPanel = new JPanel(new GridBagLayout());
@@ -226,104 +229,48 @@ public class StaticCredentialsPanel {
         c.fill = GridBagConstraints.BOTH;
         root.add(Box.createVerticalGlue(), c);
 
-        browseKey.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select OCI API Key Private Key File");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    privateKeyFile.setText(f.getAbsolutePath());
-                    markDirty();
-                }
-            }
-        });
+        browseKey.addActionListener(e -> UiStyles.browseForFile(root, "Select OCI API Key Private Key File", path -> {
+            privateKeyFile.setText(path);
+            markDirty();
+        }));
 
-        browseSessionKey.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select Session Token Private Key File");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    sessionPrivateKeyFile.setText(f.getAbsolutePath());
-                    markDirty();
-                }
-            }
-        });
+        browseSessionKey.addActionListener(e -> UiStyles.browseForFile(root, "Select Session Token Private Key File", path -> {
+            sessionPrivateKeyFile.setText(path);
+            markDirty();
+        }));
 
         if (sessionTokenField.browseButton() != null) {
-            sessionTokenField.browseButton().addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select Session Token File");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    sessionTokenField.setTokenValue(f.getAbsolutePath());
-                    clearTokenInfo(sessionTokenExpiry, sessionTokenCreated);
-                    markDirty();
-                }
-            }
-            });
+            sessionTokenField.browseButton().addActionListener(e -> UiStyles.browseForFile(root, "Select Session Token File", path -> {
+                sessionTokenField.setTokenValue(path);
+                clearTokenInfo(sessionTokenExpiry, sessionTokenCreated);
+                markDirty();
+            }));
         }
 
-        browseConfig.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select OCI Config File");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    configFile.setText(f.getAbsolutePath());
-                    markDirty();
-                }
-            }
-        });
+        browseConfig.addActionListener(e -> UiStyles.browseForFile(root, "Select OCI Config File", path -> {
+            configFile.setText(path);
+            markDirty();
+        }));
 
-        browseInstanceCert.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select Instance Principal Leaf Certificate");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    instanceLeafCert.setText(f.getAbsolutePath());
-                    markDirty();
-                }
-            }
-        });
+        browseInstanceCert.addActionListener(e -> UiStyles.browseForFile(root, "Select Instance Principal Leaf Certificate", path -> {
+            instanceLeafCert.setText(path);
+            markDirty();
+        }));
 
-        browseInstanceKey.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select Instance Principal Leaf Private Key");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    instanceLeafKey.setText(f.getAbsolutePath());
-                    markDirty();
-                }
-            }
-        });
+        browseInstanceKey.addActionListener(e -> UiStyles.browseForFile(root, "Select Instance Principal Leaf Private Key", path -> {
+            instanceLeafKey.setText(path);
+            markDirty();
+        }));
 
-        addIntermediateCert.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select Intermediate Certificate");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    String current = instanceIntermediateCerts.getText().trim();
-                    if (!current.isBlank()) {
-                        instanceIntermediateCerts.setText(current + ";" + f.getAbsolutePath());
-                    } else {
-                        instanceIntermediateCerts.setText(f.getAbsolutePath());
-                    }
-                    markDirty();
-                }
+        addIntermediateCert.addActionListener(e -> UiStyles.browseForFile(root, "Select Intermediate Certificate", path -> {
+            String current = instanceIntermediateCerts.getText().trim();
+            if (!current.isBlank()) {
+                instanceIntermediateCerts.setText(current + ";" + path);
+            } else {
+                instanceIntermediateCerts.setText(path);
             }
-        });
+            markDirty();
+        }));
 
         instanceTokenExpiry.setEditable(false);
         instanceTokenCreated.setEditable(false);
@@ -347,48 +294,60 @@ public class StaticCredentialsPanel {
             clearTokenInfo(rpstTokenExpiry, rpstTokenCreated);
             markDirty();
         });
+        instanceDelegationTokenField.setOnTokenEdited(() -> {
+            if (suppressEvents) return;
+            markDirty();
+        });
 
         refreshInstanceToken.addActionListener(e -> {
             if (currentProfile == null) return;
             applyToProfile(currentProfile, false);
-            OciX509SessionManager.SessionInfo s =
-                    OciX509SessionManager.refresh(currentProfile,
-                            msg -> logToOutput(msg),
-                            msg -> logToOutput(msg));
-            updateInstanceTokenUi(currentProfile, s);
-            if (s != null && s.token != null) {
-                logToOutput("[OCI Signer] X509 token refreshed (len=" + s.token.length() + ")");
-            }
+            Profile profileToRefresh = currentProfile;
+
+            refreshInstanceToken.setEnabled(false);
+            SwingWorker<OciX509SessionManager.SessionInfo, Void> worker = new SwingWorker<>() {
+                @Override
+                protected OciX509SessionManager.SessionInfo doInBackground() {
+                    return OciX509SessionManager.refresh(profileToRefresh, OciDebug::log, OciDebug::log);
+                }
+
+                @Override
+                protected void done() {
+                    try {
+                        OciX509SessionManager.SessionInfo s = get();
+                        updateInstanceTokenUi(profileToRefresh, s);
+                        if (s != null && s.token != null) {
+                            OciDebug.log("[OCI Signer] X509 token refreshed (len=" + s.token.length() + ")");
+                        }
+                    } catch (Exception ex) {
+                        OciDebug.logStack("[OCI Signer] X509 token refresh failed", ex);
+                    } finally {
+                        refreshInstanceToken.setEnabled(true);
+                    }
+                }
+            };
+            worker.execute();
         });
 
         if (rpstTokenField.browseButton() != null) {
-            rpstTokenField.browseButton().addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select RPST file");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    rpstTokenField.setTokenValue(f.getAbsolutePath());
-                    clearTokenInfo(rpstTokenExpiry, rpstTokenCreated);
-                    markDirty();
-                }
-            }
-            });
+            rpstTokenField.browseButton().addActionListener(e -> UiStyles.browseForFile(root, "Select RPST file", path -> {
+                rpstTokenField.setTokenValue(path);
+                clearTokenInfo(rpstTokenExpiry, rpstTokenCreated);
+                markDirty();
+            }));
         }
 
-        browseRpKey.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select Resource Principal Private Key");
-            int result = fc.showOpenDialog(root);
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    rpPrivateKey.setText(f.getAbsolutePath());
-                    markDirty();
-                }
-            }
-        });
+        if (instanceDelegationTokenField.browseButton() != null) {
+            instanceDelegationTokenField.browseButton().addActionListener(e -> UiStyles.browseForFile(root, "Select Delegation Token File", path -> {
+                instanceDelegationTokenField.setTokenValue(path);
+                markDirty();
+            }));
+        }
+
+        browseRpKey.addActionListener(e -> UiStyles.browseForFile(root, "Select Resource Principal Private Key", path -> {
+            rpPrivateKey.setText(path);
+            markDirty();
+        }));
 
         // Mutual exclusive
         modeSdk.addActionListener(e -> {
@@ -574,6 +533,7 @@ public class StaticCredentialsPanel {
                 sessionTokenField.clear();
                 instanceTokenField.clear();
                 rpstTokenField.clear();
+                instanceDelegationTokenField.clear();
 
                 modeSdk.setSelected(true);
                 modeManual.setSelected(false);
@@ -614,6 +574,7 @@ public class StaticCredentialsPanel {
             rpstTokenField.setTokenValue(p.resourcePrincipalRpst == null ? "" : p.resourcePrincipalRpst);
             rpPrivateKey.setText(p.resourcePrincipalPrivateKey == null ? "" : p.resourcePrincipalPrivateKey);
             rpPrivateKeyPassphrase.setText(p.resourcePrincipalPrivateKeyPassphrase == null ? "" : p.resourcePrincipalPrivateKeyPassphrase);
+            instanceDelegationTokenField.setTokenValue(p.delegationToken == null ? "" : p.delegationToken);
             // Token display handled by TokenField
             tenancyOcid.setText(p.tenancyOcid == null ? "" : p.tenancyOcid);
             userOcid.setText(p.userOcid == null ? "" : p.userOcid);
@@ -644,14 +605,6 @@ public class StaticCredentialsPanel {
      * Example:
      *  - sessionToken="/path/to/token" + resolveTokens=true
      *    -> sessionTokenExpiry/sessionTokenCreated are populated.
-     */
-    public void applyToProfile(Profile profile) {
-        applyToProfile(profile, false);
-    }
-
-    /**
-     * Push current UI values into the Profile.
-     * When resolveTokens=true, token file paths are read and timestamps updated.
      */
     public void applyToProfile(Profile profile, boolean resolveTokens) {
         if (profile == null) return;
@@ -695,6 +648,8 @@ public class StaticCredentialsPanel {
         profile.resourcePrincipalPrivateKey = rpPrivateKey.getText().trim();
         profile.resourcePrincipalPrivateKeyPassphrase = new String(rpPrivateKeyPassphrase.getPassword());
 
+        profile.delegationToken = instanceDelegationTokenField.tokenValue().trim();
+
         profile.tenancyOcid = tenancyOcid.getText().trim();
         profile.userOcid = userOcid.getText().trim();
         profile.fingerprint = fingerprint.getText().trim();
@@ -733,6 +688,7 @@ public class StaticCredentialsPanel {
         rpstTokenField.setEnabled(enabled);
         rpstTokenExpiry.setEnabled(enabled);
         rpstTokenCreated.setEnabled(enabled);
+        instanceDelegationTokenField.setEnabled(enabled);
         rpPrivateKey.setEnabled(enabled);
         rpPrivateKeyPassphrase.setEnabled(enabled);
         browseRpKey.setEnabled(enabled);
@@ -759,14 +715,6 @@ public class StaticCredentialsPanel {
         }
     }
 
-    private static JPanel rowWithButton(Component field, Component button) {
-        JPanel row = new JPanel(new BorderLayout(6, 0));
-        row.setOpaque(false);
-        row.add(field, BorderLayout.CENTER);
-        row.add(button, BorderLayout.EAST);
-        return row;
-    }
-
     /**
      * Return the root Swing component for embedding in the tab.
      */
@@ -779,7 +727,7 @@ public class StaticCredentialsPanel {
         FormGrid g = new FormGrid(sessionPanel, new Insets(3, 4, 3, 4));
         g.addLabelField("Tenancy OCID:", sessionTenancyOcid);
         g.addLabelField("Fingerprint:", sessionFingerprint);
-        g.addLabelField("Private Key File:", rowWithButton(sessionPrivateKeyFile, browseSessionKey));
+        g.addLabelField("Private Key File:", UiStyles.rowWithButton(sessionPrivateKeyFile, browseSessionKey));
         g.addLabelField("Key Passphrase:", sessionPrivateKeyPassphrase);
         g.addLabelField("Session Token (token or file path):",
                 sessionTokenField.row(),
@@ -795,7 +743,7 @@ public class StaticCredentialsPanel {
         configProfilePanel.setOpaque(false);
 
         FormGrid g = new FormGrid(configProfilePanel, new Insets(3, 4, 3, 4));
-        g.addLabelField("Config File:", rowWithButton(configFile, browseConfig));
+        g.addLabelField("Config File:", UiStyles.rowWithButton(configFile, browseConfig));
         g.addLabelField("Config Profile:", configProfile);
 
         JLabel regionNote = new JLabel("* Region set above overrides region in the selected config profile if set.");
@@ -811,7 +759,7 @@ public class StaticCredentialsPanel {
         g.addLabelField("Tenancy OCID:", tenancyOcid);
         g.addLabelField("User OCID:", userOcid);
         g.addLabelField("Fingerprint:", fingerprint);
-        g.addLabelField("Private Key File:", rowWithButton(privateKeyFile, browseKey));
+        g.addLabelField("Private Key File:", UiStyles.rowWithButton(privateKeyFile, browseKey));
         g.addLabelField("Key Passphrase:", privateKeyPassphrase);
 
         // Signing mode is shown globally (not API-key specific).
@@ -836,14 +784,14 @@ public class StaticCredentialsPanel {
 
         FormGrid g = new FormGrid(instanceX509Panel, new Insets(3, 4, 3, 4));
 
-        g.addLabelField("Leaf Cert:", rowWithButton(instanceLeafCert, browseInstanceCert));
-        g.addLabelField("Leaf Key:", rowWithButton(instanceLeafKey, browseInstanceKey));
+        g.addLabelField("Leaf Cert:", UiStyles.rowWithButton(instanceLeafCert, browseInstanceCert));
+        g.addLabelField("Leaf Key:", UiStyles.rowWithButton(instanceLeafKey, browseInstanceKey));
         g.addLabelField("Key Passphrase:", instanceLeafKeyPassphrase);
 
         instanceIntermediateCerts.setFont(instanceLeafCert.getFont());
         instanceIntermediateCerts.setBackground(instanceLeafCert.getBackground());
         instanceIntermediateCerts.setToolTipText("Intermediate cert file paths separated by ';' or ','");
-        g.addLabelField("Intermediate Certs:", rowWithButton(instanceIntermediateCerts, addIntermediateCert));
+        g.addLabelField("Intermediate Certs:", UiStyles.rowWithButton(instanceIntermediateCerts, addIntermediateCert));
 
         g.addLabelField("Federation Endpoint:", instanceFederationEndpoint);
 
@@ -879,9 +827,19 @@ public class StaticCredentialsPanel {
                 1.0,
                 0.12);
 
-        JPanel expiryRow = rowWithButton(instanceTokenExpiry, refreshInstanceToken);
+        JPanel expiryRow = UiStyles.rowWithButton(instanceTokenExpiry, refreshInstanceToken);
         g.addLabelField("Token Expiry (UTC):", expiryRow);
         g.addLabelField("Token Created (UTC):", instanceTokenCreated);
+
+        instanceDelegationTokenField.setTextBackground(instanceLeafCert.getBackground());
+        g.addLabelField("Delegation Token (OBO, optional):",
+                instanceDelegationTokenField.row(),
+                GridBagConstraints.BOTH,
+                1.0,
+                0.12);
+        JLabel delegationHelp = new JLabel("Acts on behalf of a user via an instance-principal signer. (Ex. CloudShell's OBO token at /etc/oci/delegation_token)");
+        delegationHelp.setFont(delegationHelp.getFont().deriveFont(Font.ITALIC));
+        g.addFullRow(delegationHelp);
     }
 
     private void buildResourcePrincipalPanel() {
@@ -889,7 +847,7 @@ public class StaticCredentialsPanel {
         resourcePrincipalPanel.setOpaque(false);
 
         FormGrid g = new FormGrid(resourcePrincipalPanel, new Insets(3, 4, 3, 4));
-        g.addLabelField("Private Key (PEM or file path):", rowWithButton(rpPrivateKey, browseRpKey));
+        g.addLabelField("Private Key (PEM or file path):", UiStyles.rowWithButton(rpPrivateKey, browseRpKey));
         g.addLabelField("Key Passphrase:", rpPrivateKeyPassphrase);
         g.addLabelField("RPST (token or file path):",
                 rpstTokenField.row(),
@@ -898,7 +856,6 @@ public class StaticCredentialsPanel {
                 0.12);
         g.addLabelField("Token Expiry (UTC):", rpstTokenExpiry);
         g.addLabelField("Token Created (UTC):", rpstTokenCreated);
-
     }
 
     private void applyAuthTypeUi() {
@@ -1045,20 +1002,8 @@ public class StaticCredentialsPanel {
             return;
         }
         instanceTokenField.setTokenValue(token);
-        if (exp > 0) {
-            String expText = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-                    .format(Instant.ofEpochSecond(exp).atOffset(ZoneOffset.UTC));
-            instanceTokenExpiry.setText(expText);
-        } else {
-            instanceTokenExpiry.setText("");
-        }
-        if (created > 0) {
-            String createdText = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-                    .format(Instant.ofEpochSecond(created).atOffset(ZoneOffset.UTC));
-            instanceTokenCreated.setText(createdText);
-        } else {
-            instanceTokenCreated.setText("");
-        }
+        instanceTokenExpiry.setText(formatEpoch(exp));
+        instanceTokenCreated.setText(formatEpoch(created));
     }
 
     private void updateTokenInfo(String tokenInput, JTextField expiryField, JTextField createdField) {
@@ -1086,14 +1031,6 @@ public class StaticCredentialsPanel {
         createdField.setText("");
     }
 
-    private void logToOutput(String msg) {
-        try {
-            if (api != null && msg != null) {
-                api.logging().logToOutput(msg);
-            }
-        } catch (Exception ignored) {}
-    }
-
     private boolean openManualSettingsModalAndApply() {
         if (currentProfile == null) return false;
 
@@ -1113,14 +1050,8 @@ public class StaticCredentialsPanel {
 
         currentProfile.manualSettings = r.settings;
 
-        try {
-            if (api != null) {
-                api.logging().logToOutput(
-                        "[OCI Signer] Saved manual signing settings for profile '" + currentProfile.name() + "': " +
-                                r.settings.toLogString()
-                );
-            }
-        } catch (Exception ignored) {}
+        OciDebug.log("[OCI Signer] Saved manual signing settings for profile '" + currentProfile.name() + "': " +
+                r.settings.toLogString());
 
         return true;
     }

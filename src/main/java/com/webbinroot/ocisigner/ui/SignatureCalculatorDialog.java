@@ -15,7 +15,7 @@ import java.awt.*;
  *  - Click Calculate
  *  - Get computed Authorization Signature + debug canonicalization output
  */
-public class SignatureCalculatorDialog extends JDialog {
+public final class SignatureCalculatorDialog extends JDialog {
 
     private final MontoyaApi api;
     private final ProfileStore store;
@@ -68,17 +68,10 @@ public class SignatureCalculatorDialog extends JDialog {
         requestScroll.setBorder(BorderFactory.createTitledBorder("HTTP Request"));
 
         JPanel outputPanel = new JPanel(new GridBagLayout());
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(4, 4, 4, 4);
-        c.anchor = GridBagConstraints.WEST;
+        FormGrid outputGrid = new FormGrid(outputPanel, new Insets(4, 4, 4, 4));
 
         signatureOut.setEditable(false);
-
-        c.gridx = 0; c.gridy = 0; c.weightx = 0; c.fill = GridBagConstraints.NONE;
-        outputPanel.add(new JLabel("Authorization (value):"), c);
-
-        c.gridx = 1; c.gridy = 0; c.weightx = 1.0; c.fill = GridBagConstraints.HORIZONTAL;
-        outputPanel.add(signatureOut, c);
+        outputGrid.addLabelField("Authorization (value):", signatureOut);
 
         debugOut.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         debugOut.setEditable(false);
@@ -87,10 +80,7 @@ public class SignatureCalculatorDialog extends JDialog {
         JScrollPane debugScroll = new JScrollPane(debugOut);
         debugScroll.setBorder(BorderFactory.createTitledBorder("Debug / Canonicalization"));
 
-        c.gridx = 0; c.gridy = 1; c.gridwidth = 2;
-        c.weightx = 1.0; c.weighty = 1.0;
-        c.fill = GridBagConstraints.BOTH;
-        outputPanel.add(debugScroll, c);
+        outputGrid.addRow(debugScroll, 2, GridBagConstraints.BOTH, 1.0, 1.0);
 
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, requestScroll, outputPanel);
         split.setResizeWeight(0.55);

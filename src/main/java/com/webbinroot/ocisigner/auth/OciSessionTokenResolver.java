@@ -5,6 +5,8 @@ import com.webbinroot.ocisigner.keys.OciPrivateKeyCache;
 import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.util.OciTokenUtils;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import java.security.PrivateKey;
 import java.util.function.Consumer;
 
@@ -143,13 +145,7 @@ public final class OciSessionTokenResolver {
         }
     }
 
-    private static String nz(String s) {
-        return s == null ? "" : s.trim();
-    }
-
     private static void logError(Consumer<String> errorLog, Consumer<String> infoLog, String msg, Throwable t) {
-        String detail = (t == null) ? "" : (" :: " + t.getClass().getSimpleName() + ": " + t.getMessage());
-        if (errorLog != null) errorLog.accept(msg + detail);
-        if (infoLog != null) infoLog.accept(msg + detail);
+        com.webbinroot.ocisigner.util.OciDebug.logErrorTo(errorLog, infoLog, msg, t);
     }
 }

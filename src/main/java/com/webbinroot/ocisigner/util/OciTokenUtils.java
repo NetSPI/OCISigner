@@ -121,4 +121,49 @@ public final class OciTokenUtils { // Utility class (static-only).
         return p; // Return unchanged if not expandable.
     }
 
+    /**
+     * Null-safe trim: null becomes "", otherwise the trimmed string.
+     */
+    public static String nz(String s) {
+        return (s == null) ? "" : s.trim();
+    }
+
+    /**
+     * True if the string is null, empty, or all whitespace.
+     */
+    public static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    /**
+     * Cheap fingerprint of a possibly-secret string, safe to put in a cache key or
+     * debug log line without leaking the raw value.
+     */
+    public static String cachePart(String s) {
+        String v = nz(s);
+        if (v.isBlank()) return "";
+        return "hash:" + Integer.toHexString(v.hashCode()) + ":" + v.length();
+    }
+
+    /**
+     * Trim + lowercase a region id, or "" if blank.
+     */
+    public static String normalizeRegionId(String region) {
+        String v = nz(region);
+        if (v.isEmpty()) return "";
+        return v.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * Base64-encoded SHA-256 digest (x-content-sha256 body hash, cert fingerprinting, etc).
+     */
+    public static String base64Sha256(byte[] data) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.Base64.getEncoder().encodeToString(md.digest(data));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("SHA-256 failed: " + e.getMessage(), e);
+        }
+    }
+
 }

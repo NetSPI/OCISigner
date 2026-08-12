@@ -18,7 +18,7 @@ public class OciSignerTab {
         root = new JPanel(new BorderLayout());
         root.setBorder(new EmptyBorder(6, 6, 6, 6));
 
-        GlobalSettingsPanel global = new GlobalSettingsPanel(api, store);
+        GlobalSettingsPanel global = new GlobalSettingsPanel(store);
 
         ProfileManagementPanel left = new ProfileManagementPanel(api, store, global);
         ProfileConfigurationPanel right = new ProfileConfigurationPanel(api, store);

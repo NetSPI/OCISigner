@@ -6,6 +6,8 @@ import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.model.ProfileStore;
 import com.webbinroot.ocisigner.model.SigningMode;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.AbstractTableModel;
@@ -39,7 +41,7 @@ import java.util.Map;
  * region=...
  * key_file=...
  */
-public class ImportProfilesDialog extends JDialog {
+public final class ImportProfilesDialog extends JDialog {
 
     private final MontoyaApi api;
     private final ProfileStore store;
@@ -205,26 +207,21 @@ public class ImportProfilesDialog extends JDialog {
     }
 
     private void onFile() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Select OCI config file");
-        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        UiStyles.browseForFile(this, "Select OCI config file", path -> {
+            File f = new File(path);
+            if (!f.isFile()) return;
 
-        int res = chooser.showOpenDialog(this);
-        if (res != JFileChooser.APPROVE_OPTION) return;
-
-        File f = chooser.getSelectedFile();
-        if (f == null || !f.isFile()) return;
-
-        try {
-            loadIniFile(f, "File");
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Failed to parse file: " + ex.getMessage(),
-                    "Import",
-                    JOptionPane.ERROR_MESSAGE
-            );
-        }
+            try {
+                loadIniFile(f, "File");
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to parse file: " + ex.getMessage(),
+                        "Import",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+        });
     }
 
     private void loadIniFile(File file, String sourceName) throws Exception {
@@ -283,13 +280,13 @@ public class ImportProfilesDialog extends JDialog {
             p.signingMode = SigningMode.SDK;
 
             // Values
-            p.userOcid = safe(c.user);
-            p.tenancyOcid = safe(c.tenancy);
-            p.fingerprint = safe(c.fingerprint);
-            p.privateKeyPath = safe(c.keyFile);
+            p.userOcid = nz(c.user);
+            p.tenancyOcid = nz(c.tenancy);
+            p.fingerprint = nz(c.fingerprint);
+            p.privateKeyPath = nz(c.keyFile);
 
             // Helpers
-            p.region = safe(c.region);
+            p.region = nz(c.region);
 
             // Session token auth uses the same config file + profile name.
             if (lastLoadedFile != null) {
@@ -319,10 +316,6 @@ public class ImportProfilesDialog extends JDialog {
             i++;
         }
         return name;
-    }
-
-    private static String safe(String s) {
-        return s == null ? "" : s.trim();
     }
 
     /**

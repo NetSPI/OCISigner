@@ -3,19 +3,21 @@ package com.webbinroot.ocisigner;
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.Registration;
+import burp.api.montoya.core.ToolType;
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
 import burp.api.montoya.http.handler.HttpResponseReceived;
 import burp.api.montoya.http.handler.RequestToBeSentAction;
 import burp.api.montoya.http.handler.ResponseReceivedAction;
 import burp.api.montoya.http.message.requests.HttpRequest;
-import burp.api.montoya.proxy.http.InterceptedRequest;
-import burp.api.montoya.proxy.http.ProxyRequestHandler;
-import burp.api.montoya.proxy.http.ProxyRequestReceivedAction;
-import burp.api.montoya.proxy.http.ProxyRequestToBeSentAction;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 
+import com.webbinroot.ocisigner.auth.OciConfigProfileResolver;
+import com.webbinroot.ocisigner.auth.OciCrypto;
+import com.webbinroot.ocisigner.auth.OciRpstSessionManager;
+import com.webbinroot.ocisigner.auth.OciX509SessionManager;
+import com.webbinroot.ocisigner.keys.OciPrivateKeyCache;
 import com.webbinroot.ocisigner.util.OciDebug;
 import com.webbinroot.ocisigner.signing.OciRequestSigner;
 import com.webbinroot.ocisigner.model.Profile;
@@ -45,7 +47,7 @@ public class OciSignerExtension implements BurpExtension {
     private Registration contextMenuReg;
 
     @SuppressWarnings("unused")
-    private Registration proxyRequestHandlerReg;
+    private Registration unloadingHandlerReg;
 
     @Override
     public void initialize(MontoyaApi api) {
@@ -84,6 +86,15 @@ public class OciSignerExtension implements BurpExtension {
                     return RequestToBeSentAction.continueWith(requestToBeSent);
                 }
 
+                if (requestToBeSent.toolSource().isFromTool(ToolType.EXTENSIONS)) {
+                    // Our own Test Credentials probe (ProfileConfigurationPanel) already
+                    // signs itself via a direct OciRequestSigner.sign() call before handing
+                    // off to api.http().sendRequest() -- letting it re-enter here would
+                    // sign it a second time, the same double-signing bug class as the
+                    // removed ProxyRequestHandler registration above.
+                    return RequestToBeSentAction.continueWith(requestToBeSent);
+                }
+
                 HttpRequest signed = signIfEnabled(api, requestToBeSent, requestToBeSent.isInScope());
                 return RequestToBeSentAction.continueWith(signed);
             }
@@ -95,20 +106,11 @@ public class OciSignerExtension implements BurpExtension {
             }
         });
 
-        // Proxy request handler (script/browser traffic through Burp Proxy).
-        proxyRequestHandlerReg = api.proxy().registerRequestHandler(new ProxyRequestHandler() {
-            @Override
-            public ProxyRequestReceivedAction handleRequestReceived(InterceptedRequest interceptedRequest) {
-                // Keep user intercept rules unchanged.
-                return ProxyRequestReceivedAction.continueWith(interceptedRequest);
-            }
-
-            @Override
-            public ProxyRequestToBeSentAction handleRequestToBeSent(InterceptedRequest interceptedRequest) {
-                HttpRequest signed = signIfEnabled(api, interceptedRequest, interceptedRequest.isInScope());
-                return ProxyRequestToBeSentAction.continueWith(signed);
-            }
-        });
+        // NOTE: no separate api.proxy().registerRequestHandler() here. Montoya's
+        // generic HttpHandler (registered above) already fires for "requests made by
+        // any Burp tool", Proxy included -- registering both handlers signed every
+        // Proxy-sourced request twice (the first pass's work was fully discarded when
+        // the second pass re-signed over its own already-added Authorization header).
 
         // Right-click context menu
         contextMenuReg = api.userInterface().registerContextMenuItemsProvider(new ContextMenuItemsProvider() {
@@ -156,6 +158,18 @@ public class OciSignerExtension implements BurpExtension {
                 items.add(root);
                 return items;
             }
+        });
+
+        // Release in-memory credential caches (private keys, session tokens, RequestSigners,
+        // pooled federation HttpClients) when the extension unloads, rather than leaving
+        // decrypted key material sitting in static caches until Burp itself exits.
+        unloadingHandlerReg = api.extension().registerUnloadingHandler(() -> {
+            OciX509SessionManager.clear();
+            OciRpstSessionManager.clear();
+            OciCrypto.clear();
+            OciPrivateKeyCache.clear();
+            OciConfigProfileResolver.clear();
+            api.logging().logToOutput("[OCI Signer] Unloaded; credential caches cleared.");
         });
 
         // Startup log (no disk access).

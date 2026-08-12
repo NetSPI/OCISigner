@@ -1,5 +1,7 @@
 package com.webbinroot.ocisigner.keys;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
 import java.util.Arrays;
@@ -79,13 +81,11 @@ public final class OciPrivateKeyCache {
     }
 
     /**
-     * Clear cached private keys (no disk side-effects).
+     * Drop all cached private keys (and the underlying PEM-bytes cache). Called on
+     * extension unload -- decrypted key material shouldn't linger in memory after that.
      */
     public static void clear() {
         CACHE.clear();
-    }
-
-    private static String nz(String s) {
-        return s == null ? "" : s.trim();
+        KEY_LOADER.clear();
     }
 }

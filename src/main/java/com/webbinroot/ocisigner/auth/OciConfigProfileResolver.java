@@ -4,7 +4,12 @@ import com.oracle.bmc.ConfigFileReader;
 import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.util.OciTokenUtils;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Shared resolver for OCI config profiles.
@@ -34,7 +39,30 @@ public final class OciConfigProfileResolver {
         }
     }
 
+    private static final class CachedConfig {
+        final long lastModified;
+        final ResolvedConfig resolved;
+
+        CachedConfig(long lastModified, ResolvedConfig resolved) {
+            this.lastModified = lastModified;
+            this.resolved = resolved;
+        }
+    }
+
+    // Config profile paths/names, not the credential material itself -- unlike token
+    // files (which rotate and are always re-read fresh), the config file only changes
+    // when the user edits it, so a plain mtime cache avoids re-parsing it on every
+    // signed request.
+    private static final ConcurrentHashMap<String, CachedConfig> CACHE = new ConcurrentHashMap<>();
+
     private OciConfigProfileResolver() {}
+
+    /**
+     * Drop all cached parsed config files. Called on extension unload.
+     */
+    public static void clear() {
+        CACHE.clear();
+    }
 
     /**
      * Resolve config file + profile name.
@@ -48,8 +76,19 @@ public final class OciConfigProfileResolver {
         String path = OciTokenUtils.expandHome(nz(p == null ? "" : p.configFilePath));
         String prof = nz(p == null ? "" : p.configProfileName);
         if (prof.isBlank()) prof = "DEFAULT";
+
+        String cacheKey = path + "|" + prof;
+        long lastModified = Files.getLastModifiedTime(Path.of(path)).toMillis();
+
+        CachedConfig cached = CACHE.get(cacheKey);
+        if (cached != null && cached.lastModified == lastModified) {
+            return cached.resolved;
+        }
+
         ConfigFileReader.ConfigFile cfg = ConfigFileReader.parse(path, prof);
-        return new ResolvedConfig(path, prof, cfg, hasSecurityToken(cfg));
+        ResolvedConfig resolved = new ResolvedConfig(path, prof, cfg, hasSecurityToken(cfg));
+        CACHE.put(cacheKey, new CachedConfig(lastModified, resolved));
+        return resolved;
     }
 
     /**
@@ -73,9 +112,5 @@ public final class OciConfigProfileResolver {
         tmp.privateKeyPath = OciTokenUtils.expandHome(nz((cfg == null) ? "" : cfg.get("key_file")));
         tmp.privateKeyPassphrase = (cfg == null) ? "" : nz(cfg.get("pass_phrase"));
         return tmp;
-    }
-
-    private static String nz(String s) {
-        return s == null ? "" : s.trim();
     }
 }

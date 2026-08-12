@@ -3,13 +3,15 @@ package com.webbinroot.ocisigner.signing;
 import com.webbinroot.ocisigner.keys.OciPrivateKeyCache;
 import com.webbinroot.ocisigner.model.ManualSigningSettings;
 import com.webbinroot.ocisigner.model.Profile;
+
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.PrivateKey;
-import java.security.Signature;
 import java.util.*;
 
 public final class OciManualSigner {
@@ -55,7 +57,7 @@ public final class OciManualSigner {
                 bodyBytes,
                 objectStoragePutSpecial,
                 false,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                null
         );
 
         String alg = nz(settings.algorithm).toLowerCase(Locale.ROOT);
@@ -88,22 +90,15 @@ public final class OciManualSigner {
 
         // RSA modes
         if (algorithm.startsWith("rsa-")) {
-            String sigAlg;
-            switch (algorithm) {
-                case "rsa-sha256" -> sigAlg = "SHA256withRSA";
-                case "rsa-sha384" -> sigAlg = "SHA384withRSA";
-                case "rsa-sha512" -> sigAlg = "SHA512withRSA";
-                default -> throw new IllegalArgumentException("Unsupported RSA manual algorithm: " + algorithm);
+            String sigAlg = OciSigningUtils.rsaJcaAlgorithm(algorithm);
+            if (sigAlg == null) {
+                throw new IllegalArgumentException("Unsupported RSA manual algorithm: " + algorithm);
             }
 
             PrivateKey pk = loadPrivateKeyCached(profile);
 
             try {
-                Signature s = Signature.getInstance(sigAlg);
-                s.initSign(pk);
-                s.update(signingString.getBytes(StandardCharsets.UTF_8));
-                byte[] sig = s.sign();
-                return Base64.getEncoder().encodeToString(sig);
+                return OciSigningUtils.signRsaBase64(pk, sigAlg, signingString);
             } catch (Exception e) {
                 throw new IllegalArgumentException("Manual RSA signing failed: " + e.getMessage(), e);
             }
@@ -215,9 +210,5 @@ public final class OciManualSigner {
         sb.append(authorizationValue).append("\n");
 
         return sb.toString();
-    }
-
-    private static String nz(String s) {
-        return (s == null) ? "" : s.trim();
     }
 }

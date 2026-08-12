@@ -34,17 +34,20 @@ public class ProfileStore {
     // Profiles (in-memory)
     // -----------------------------
     private final List<Profile> profiles = new ArrayList<>();
-    private Profile selected = null;
+    // volatile: written from the EDT (UI), read from Burp's background HTTP-handling
+    // threads on every live signing pass -- plain fields have no cross-thread
+    // visibility guarantee without this.
+    private volatile Profile selected = null;
 
     // -----------------------------
     // Global settings (in-memory)
     // -----------------------------
-    private boolean signingEnabled = false;
+    private volatile boolean signingEnabled = false;
 
     // nullable => No Profile
-    private Profile alwaysSignWith = null;
+    private volatile Profile alwaysSignWith = null;
 
-    private String logLevel = "Error";
+    private volatile String logLevel = "Error";
 
     /**
      * Initialize store with a default profile.
@@ -55,7 +58,10 @@ public class ProfileStore {
         profiles.add(p1);
 
         selected = p1;
-        alwaysSignWith = p1;
+        // alwaysSignWith deliberately stays null (No Profile): the user has to
+        // explicitly choose a profile before signing can activate, rather than
+        // enabling "Signing Enabled" silently starting to sign with whatever
+        // profile happened to exist first.
     }
 
     /**
@@ -100,19 +106,10 @@ public class ProfileStore {
         profiles.add(p);
         selected = p;
 
-        // If no global profile set yet, prefer first imported.
-        if (alwaysSignWith == null) {
-            alwaysSignWith = p;
-        }
-
         fire("profile_imported");
         fire("selected_profile");
     }
 
-    /**
-     * Convenience: create and add an imported profile with a given name.
-     * Returns the created Profile.
-     */
     /**
      * Convenience: create and add a profile with a specific name.
      * Example input: "Prod"
@@ -124,10 +121,6 @@ public class ProfileStore {
         return p;
     }
 
-    /**
-     * For now: "persistence" means emit an event (UI can log it).
-     * Future: write to disk / Burp persistence API.
-     */
     /**
      * Persist profiles (currently event-only).
      * Example output event: "profiles_saved"
@@ -159,39 +152,7 @@ public class ProfileStore {
      * Example input: Profile("Profile1") -> "Profile1_copy"
      */
     public Profile copy(Profile p) {
-        Profile c = new Profile(p.name() + "_copy");
-
-        c.setInScopeOnly(p.inScopeOnly());
-        c.setAuthType(p.authType());
-        c.updateTimestamp = p.updateTimestamp;
-        c.signingMode = p.signingMode;
-        c.onlyWithAuthHeader = p.onlyWithAuthHeader;
-        c.configFilePath = p.configFilePath;
-        c.configProfileName = p.configProfileName;
-        c.instanceX509LeafCert = p.instanceX509LeafCert;
-        c.instanceX509LeafKey = p.instanceX509LeafKey;
-        c.instanceX509LeafKeyPassphrase = p.instanceX509LeafKeyPassphrase;
-        c.instanceX509IntermediateCerts = p.instanceX509IntermediateCerts;
-        c.instanceX509FederationEndpoint = p.instanceX509FederationEndpoint;
-        c.instanceX509TenancyOcid = p.instanceX509TenancyOcid;
-        c.federationProxyHost = p.federationProxyHost;
-        c.federationProxyPort = p.federationProxyPort;
-        c.federationProxyEnabled = p.federationProxyEnabled;
-        c.federationInsecureTls = p.federationInsecureTls;
-        c.resourcePrincipalRpst = p.resourcePrincipalRpst;
-        c.resourcePrincipalPrivateKey = p.resourcePrincipalPrivateKey;
-        c.resourcePrincipalPrivateKeyPassphrase = p.resourcePrincipalPrivateKeyPassphrase;
-
-        c.tenancyOcid = p.tenancyOcid;
-        c.userOcid = p.userOcid;
-        c.fingerprint = p.fingerprint;
-        c.privateKeyPath = p.privateKeyPath;
-        c.privateKeyPassphrase = p.privateKeyPassphrase;
-
-        c.region = p.region;
-
-        // Manual settings are mutable; keep a copy so edits don't affect the original profile.
-        c.manualSettings = (p.manualSettings == null) ? null : p.manualSettings.copy();
+        Profile c = p.copy(p.name() + "_copy");
 
         profiles.add(c);
         selected = c;
@@ -262,9 +223,4 @@ public class ProfileStore {
      * Example input: "profile_saved"
      */
     public void changed(String event) { fire(event); }
-
-    /**
-     * Fire a custom change event (profile unused but keeps API flexible).
-     */
-    public void changed(String event, Profile profile) { fire(event); }
 }

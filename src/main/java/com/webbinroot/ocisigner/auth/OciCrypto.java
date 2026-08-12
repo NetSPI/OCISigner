@@ -25,6 +25,11 @@ import com.webbinroot.ocisigner.signing.OciSessionTokenSigner;
 import com.webbinroot.ocisigner.util.OciDebug;
 import com.webbinroot.ocisigner.util.OciTokenUtils;
 
+import static com.webbinroot.ocisigner.keys.OciX509Suppliers.describeSource;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.cachePart;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.normalizeRegionId;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.net.URI;
@@ -37,13 +42,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 /**
  * OCI SDK crypto helpers.
@@ -57,6 +59,15 @@ public final class OciCrypto {
 
     private static final ConcurrentHashMap<String, RequestSigner> SIGNER_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, String> SESSION_TOKEN_HASH = new ConcurrentHashMap<>();
+
+    /**
+     * Drop all cached RequestSigners. Called on extension unload.
+     */
+    public static void clear() {
+        SIGNER_CACHE.clear();
+        SESSION_TOKEN_HASH.clear();
+    }
+
     /**
      * Build (or fetch cached) OCI SDK RequestSigner for a Profile.
      * Heavy operations must be amortized; this caching is critical to prevent Burp freezing.
@@ -80,14 +91,7 @@ public final class OciCrypto {
             }
             OciDebug.debug("[OCI Signer][Signer] Cache miss for key=" + key + " (session token)");
             return SIGNER_CACHE.compute(key, (k, existing) -> withContextClassLoader(() -> {
-                OciDebug.debug("[OCI Signer][Signer] Creating RequestSigner...");
-                BasicAuthenticationDetailsProvider provider = buildAuthProvider(p);
-                SigningStrategy strategy = excludeBodyStrategy
-                        ? SigningStrategy.EXCLUDE_BODY
-                        : SigningStrategy.STANDARD;
-                OciDebug.debug("[OCI Signer][Signer] Strategy=" + strategy);
-                RequestSigner signer = DefaultRequestSigner.createRequestSigner(provider, strategy);
-                OciDebug.debug("[OCI Signer][Signer] RequestSigner created: " + signer.getClass().getName());
+                RequestSigner signer = buildSigner(p, excludeBodyStrategy);
                 SESSION_TOKEN_HASH.put(k, tokenHash);
                 return signer;
             }));
@@ -100,17 +104,19 @@ public final class OciCrypto {
         }
 
         OciDebug.debug("[OCI Signer][Signer] Cache miss for key=" + key);
-        return SIGNER_CACHE.computeIfAbsent(key, k -> withContextClassLoader(() -> {
-            OciDebug.debug("[OCI Signer][Signer] Creating RequestSigner...");
-            BasicAuthenticationDetailsProvider provider = buildAuthProvider(p);
-            SigningStrategy strategy = excludeBodyStrategy
-                    ? SigningStrategy.EXCLUDE_BODY
-                    : SigningStrategy.STANDARD;
-            OciDebug.debug("[OCI Signer][Signer] Strategy=" + strategy);
-            RequestSigner signer = DefaultRequestSigner.createRequestSigner(provider, strategy);
-            OciDebug.debug("[OCI Signer][Signer] RequestSigner created: " + signer.getClass().getName());
-            return signer;
-        }));
+        return SIGNER_CACHE.computeIfAbsent(key, k -> withContextClassLoader(() -> buildSigner(p, excludeBodyStrategy)));
+    }
+
+    private static RequestSigner buildSigner(Profile p, boolean excludeBodyStrategy) {
+        OciDebug.debug("[OCI Signer][Signer] Creating RequestSigner...");
+        BasicAuthenticationDetailsProvider provider = buildAuthProvider(p);
+        SigningStrategy strategy = excludeBodyStrategy
+                ? SigningStrategy.EXCLUDE_BODY
+                : SigningStrategy.STANDARD;
+        OciDebug.debug("[OCI Signer][Signer] Strategy=" + strategy);
+        RequestSigner signer = DefaultRequestSigner.createRequestSigner(provider, strategy);
+        OciDebug.debug("[OCI Signer][Signer] RequestSigner created: " + signer.getClass().getName());
+        return signer;
     }
 
     private static BasicAuthenticationDetailsProvider buildAuthProvider(Profile p) {
@@ -130,7 +136,7 @@ public final class OciCrypto {
                     InstancePrincipalsAuthenticationDetailsProvider.builder();
             b.federationClientConfigurator(federationTimeouts(p));
 
-            if (hasInstanceX509Inputs(p)) {
+            if (OciX509SessionManager.hasInstanceX509Inputs(p)) {
                 OciDebug.debug("[OCI Signer][Federation] Instance X509 inputs provided (leaf cert/key).");
                 OciDebug.debug("[OCI Signer][Federation] LeafCert=" + describeSource(p.instanceX509LeafCert)
                         + " | LeafKey=" + describeSource(p.instanceX509LeafKey)
@@ -150,12 +156,12 @@ public final class OciCrypto {
 
                 String federationEndpoint = nz(p.instanceX509FederationEndpoint);
                 if (federationEndpoint.isBlank()) {
-                    federationEndpoint = federationEndpointFromRegion(p.region);
+                    federationEndpoint = OciX509SessionManager.federationEndpointFromRegion(p.region);
                 }
                 if (federationEndpoint.isBlank()) {
                     throw new IllegalArgumentException("Instance principal X.509 requires a federation endpoint or region.");
                 }
-                federationEndpoint = normalizeFederationEndpoint(federationEndpoint);
+                federationEndpoint = OciX509SessionManager.normalizeFederationEndpoint(federationEndpoint);
                 OciDebug.debug("[OCI Signer][Federation] Using federation endpoint: " + federationEndpoint);
                 logProxySelector(federationEndpoint);
                 b.federationEndpoint(federationEndpoint);
@@ -179,7 +185,7 @@ public final class OciCrypto {
             OciDebug.info("[OCI Signer][Federation] Building auth provider: Resource Principal");
             logClassInfo("com.oracle.bmc.auth.ResourcePrincipalAuthenticationDetailsProvider");
             // Uses resource principals / OBO, based on environment variables.
-            boolean hasExplicit = hasResourcePrincipalInputs(p);
+            boolean hasExplicit = OciRpstSessionManager.hasExplicitInputs(p);
             if (hasExplicit) {
                 String rpst = nz(p.resourcePrincipalRpst);
                 String priv = nz(p.resourcePrincipalPrivateKey);
@@ -383,30 +389,29 @@ public final class OciCrypto {
                 return "OK (token length: " + material.token.length() + ")";
             }
 
-            BasicAuthenticationDetailsProvider provider = buildAuthProvider(p);
-            OciDebug.debug("[OCI Signer][Test] Provider class: " + provider.getClass().getName());
-            if (provider instanceof RefreshableOnNotAuthenticatedProvider<?> refreshable) {
-                OciDebug.info("[OCI Signer][Test] Refreshable provider detected; attempting refresh...");
-                Object token = refreshable.refresh();
-                if (token == null) return "OK (refresh returned null)";
-                String t = token.toString();
-                int len = t.length();
-                OciDebug.info("[OCI Signer][Test] Refresh succeeded; token length=" + len);
-                return "OK (token length: " + len + ")";
+            try {
+                BasicAuthenticationDetailsProvider provider = buildAuthProvider(p);
+                OciDebug.debug("[OCI Signer][Test] Provider class: " + provider.getClass().getName());
+                if (provider instanceof RefreshableOnNotAuthenticatedProvider<?> refreshable) {
+                    OciDebug.info("[OCI Signer][Test] Refreshable provider detected; attempting refresh...");
+                    Object token = refreshable.refresh();
+                    if (token == null) return "OK (refresh returned null)";
+                    String t = token.toString();
+                    int len = t.length();
+                    OciDebug.info("[OCI Signer][Test] Refresh succeeded; token length=" + len);
+                    return "OK (token length: " + len + ")";
+                }
+                OciDebug.info("[OCI Signer][Test] Provider not refreshable.");
+                return "OK (no refresh available)";
+            } catch (Exception e) {
+                OciDebug.info("[OCI Signer][Test] Building/refreshing auth provider failed: " + e.getMessage());
+                return "FAILED (" + e.getMessage() + ")";
             }
-            OciDebug.info("[OCI Signer][Test] Provider not refreshable.");
-            return "OK (no refresh available)";
         });
     }
 
-    private static String nz(String s) {
-        return (s == null) ? "" : s.trim();
-    }
-
     private static String tokenHash(String tokenOrPath) {
-        String token = OciTokenUtils.resolveTokenValue(tokenOrPath);
-        if (token == null || token.isBlank()) return "";
-        return Integer.toHexString(token.hashCode()) + ":" + token.length();
+        return cachePart(OciTokenUtils.resolveTokenValue(tokenOrPath));
     }
 
     private static String testNamespaceWithSessionToken(Profile p, String token, java.security.PrivateKey privateKey) {
@@ -451,9 +456,13 @@ public final class OciCrypto {
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
             HttpResponse<String> resp = client.send(b.build(), HttpResponse.BodyHandlers.ofString());
-            return "OK (token length: " + token.length() + "; namespace HTTP " + resp.statusCode() + ")";
+            int status = resp.statusCode();
+            if (status >= 200 && status < 300) {
+                return "OK (token length: " + token.length() + "; namespace HTTP " + status + ")";
+            }
+            return "FAILED (token length: " + token.length() + "; namespace HTTP " + status + ")";
         } catch (Exception e) {
-            return "OK (token length: " + token.length() + "; namespace test failed: " + e.getMessage() + ")";
+            return "FAILED (token length: " + token.length() + "; namespace test failed: " + e.getMessage() + ")";
         }
     }
 
@@ -484,8 +493,8 @@ public final class OciCrypto {
 
         if (type == AuthType.INSTANCE_PRINCIPAL || type == AuthType.RESOURCE_PRINCIPAL) {
             String fed = nz(p.instanceX509FederationEndpoint);
-            if (fed.isBlank()) fed = federationEndpointFromRegion(p.region);
-            fed = normalizeFederationEndpoint(fed);
+            if (fed.isBlank()) fed = OciX509SessionManager.federationEndpointFromRegion(p.region);
+            fed = OciX509SessionManager.normalizeFederationEndpoint(fed);
             String key = String.join("|",
                     base,
                     cachePart(p.instanceX509LeafCert),
@@ -516,46 +525,6 @@ public final class OciCrypto {
         );
         OciDebug.debug("[OCI Signer][Signer] CacheKey(API)=" + key);
         return key;
-    }
-
-    private static boolean hasInstanceX509Inputs(Profile p) {
-        return !(nz(p.instanceX509LeafCert).isBlank() && nz(p.instanceX509LeafKey).isBlank());
-    }
-
-    private static boolean hasResourcePrincipalInputs(Profile p) {
-        return !(nz(p.resourcePrincipalRpst).isBlank() && nz(p.resourcePrincipalPrivateKey).isBlank());
-    }
-
-    private static String federationEndpointFromRegion(String region) {
-        String r = nz(region);
-        if (r.isBlank()) return "";
-        // Java SDK expects the AUTH service base endpoint (no /v1/x509 in the base).
-        return "https://auth." + r + ".oraclecloud.com";
-    }
-
-    private static String normalizeFederationEndpoint(String endpoint) {
-        String e = nz(endpoint);
-        if (e.isBlank()) return e;
-        try {
-            java.net.URI uri = java.net.URI.create(e);
-            String scheme = (uri.getScheme() == null || uri.getScheme().isBlank()) ? "https" : uri.getScheme();
-            String host = uri.getHost();
-            int port = uri.getPort();
-            if (host == null || host.isBlank()) return e;
-
-            StringBuilder base = new StringBuilder();
-            base.append(scheme).append("://").append(host);
-            if (port > 0) base.append(":").append(port);
-
-            String path = uri.getPath();
-            if (path != null && !path.isBlank() && !"/".equals(path)) {
-                OciDebug.debug("[OCI Signer][Federation] Normalized endpoint (strip path '" + path + "') -> " + base);
-            }
-            return base.toString();
-        } catch (Exception ignored) {
-            // If URI parsing fails, avoid changing user input.
-            return e;
-        }
     }
 
     private static ConfigFileReader.ConfigFile configWithOptionalRegionOverride(ConfigFileReader.ConfigFile src,
@@ -591,29 +560,6 @@ public final class OciCrypto {
         cfg.append(key).append("=").append(v).append("\n");
     }
 
-    private static String normalizeRegionId(String region) {
-        String v = nz(region);
-        if (v.isBlank()) return "";
-        return v.toLowerCase(Locale.ROOT);
-    }
-
-    private static String cachePart(String s) {
-        String v = nz(s);
-        if (v.isBlank()) return "";
-        if (looksLikePath(v)) {
-            return "path:" + v;
-        }
-        return "hash:" + Integer.toHexString(v.hashCode()) + ":" + v.length();
-    }
-
-    private static boolean looksLikePath(String v) {
-        try {
-            Path p = Path.of(v);
-            return Files.exists(p);
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
 
     private static <T> T withContextClassLoader(Supplier<T> fn) {
         Thread t = Thread.currentThread();
@@ -658,7 +604,7 @@ public final class OciCrypto {
             }
 
             if (p != null && p.federationInsecureTls) {
-                SSLContext ctx = insecureSslContext();
+                SSLContext ctx = OciX509SessionManager.insecureSslContext();
                 if (ctx != null) {
                     builder.property(StandardClientProperties.SSL_CONTEXT, ctx);
                     OciDebug.info("[OCI Signer][Federation] Insecure TLS enabled (trust all).");
@@ -681,46 +627,8 @@ public final class OciCrypto {
                 + " | trustStoreType=" + System.getProperty("javax.net.ssl.trustStoreType"));
     }
 
-    private static SSLContext insecureSslContext() {
-        try {
-            TrustManager[] trustAll = new TrustManager[] {
-                    new X509TrustManager() {
-                        @Override
-                        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                            return new java.security.cert.X509Certificate[0];
-                        }
-                        @Override
-                        public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
-                        @Override
-                        public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
-                    }
-            };
-            SSLContext sc = SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new java.security.SecureRandom());
-            return sc;
-        } catch (Exception e) {
-            OciDebug.logStack("[OCI Signer][Federation] Failed to init insecure SSL context", e);
-            return null;
-        }
-    }
-
     private static final class JvmInfoHolder {
         static boolean logged = false;
-    }
-
-    private static String describeSource(String source) {
-        if (source == null) return "(null)";
-        String s = source.trim();
-        if (s.isEmpty()) return "(empty)";
-        if (s.contains("-----BEGIN")) return "inline PEM (len=" + s.length() + ")";
-        try {
-            Path p = Path.of(s);
-            if (Files.isRegularFile(p)) {
-                long size = Files.size(p);
-                return "file:" + p + " (bytes=" + size + ")";
-            }
-        } catch (Exception ignored) {}
-        return "raw text (len=" + s.length() + ")";
     }
 
     private static int countLines(String s) {
@@ -729,6 +637,7 @@ public final class OciCrypto {
     }
 
     private static void logClassInfo(String className) {
+        if (!OciDebug.isDebugEnabled()) return;
         try {
             ClassLoader cl = OciCrypto.class.getClassLoader();
             Class<?> c = Class.forName(className, false, cl);
@@ -744,6 +653,7 @@ public final class OciCrypto {
     }
 
     private static void logProxySelector(String endpoint) {
+        if (!OciDebug.isDebugEnabled()) return;
         try {
             java.net.URI uri = java.net.URI.create(endpoint);
             java.net.ProxySelector sel = java.net.ProxySelector.getDefault();

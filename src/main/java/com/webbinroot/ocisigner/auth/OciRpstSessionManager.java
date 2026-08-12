@@ -2,7 +2,14 @@ package com.webbinroot.ocisigner.auth;
 
 import com.webbinroot.ocisigner.keys.OciPrivateKeyCache;
 import com.webbinroot.ocisigner.model.Profile;
+import com.webbinroot.ocisigner.util.OciDebug;
 import com.webbinroot.ocisigner.util.OciTokenUtils;
+
+import static com.webbinroot.ocisigner.auth.OciX509SessionManager.isExpiredSoon;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.cachePart;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.isBlank;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import java.security.PrivateKey;
 import java.time.Instant;
 import java.util.Objects;
@@ -18,9 +25,15 @@ import java.util.function.Consumer;
  */
 public final class OciRpstSessionManager {
     private static final ConcurrentHashMap<String, OciX509SessionManager.SessionInfo> CACHE = new ConcurrentHashMap<>();
-    private static final long REFRESH_SKEW_SEC = 120;
 
     private OciRpstSessionManager() {}
+
+    /**
+     * Drop all cached RPST tokens + session keys. Called on extension unload.
+     */
+    public static void clear() {
+        CACHE.clear();
+    }
 
     /**
      * True if RPST + private key inputs are present.
@@ -87,38 +100,15 @@ public final class OciRpstSessionManager {
                             Instant.now().getEpochSecond()
                     );
 
-            if (infoLog != null) {
-                infoLog.accept("[OCI Signer][RP] RPST loaded; exp=" + exp);
-            }
+            OciDebug.logTo(infoLog, "[OCI Signer][RP] RPST loaded; exp=" + exp);
             return info;
         } catch (Exception e) {
-            if (errorLog != null) errorLog.accept("[OCI Signer][RP] Failed loading RPST: " + e.getMessage());
-            if (infoLog != null) infoLog.accept("[OCI Signer][RP] Failed loading RPST: " + e.getMessage());
+            OciDebug.logErrorTo(errorLog, infoLog, "[OCI Signer][RP] Failed loading RPST", e);
             return null;
         }
     }
 
-    private static boolean isExpiredSoon(OciX509SessionManager.SessionInfo info) {
-        if (info == null) return true;
-        long now = Instant.now().getEpochSecond();
-        return (info.expEpochSec - now) <= REFRESH_SKEW_SEC;
-    }
-
     private static String cacheKey(Profile p) {
         return "RP|" + cachePart(p.resourcePrincipalRpst) + "|" + cachePart(p.resourcePrincipalPrivateKey);
-    }
-
-    private static String cachePart(String s) {
-        String v = nz(s);
-        if (v.isBlank()) return "";
-        return "hash:" + Integer.toHexString(v.hashCode()) + ":" + v.length();
-    }
-
-    private static boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
-    }
-
-    private static String nz(String s) {
-        return s == null ? "" : s.trim();
     }
 }

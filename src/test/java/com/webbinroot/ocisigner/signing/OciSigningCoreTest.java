@@ -33,7 +33,7 @@ class OciSigningCoreTest {
                 body,
                 true,
                 false,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                null
         );
 
         assertEquals(List.of("(request-target)", "date", "host", "x-content-sha256"), prepared.headersToSign);
@@ -62,7 +62,7 @@ class OciSigningCoreTest {
                 "hello".getBytes(StandardCharsets.UTF_8),
                 true,
                 false,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                null
         );
 
         assertEquals(List.of("(request-target)", "date", "host", "content-length"), prepared.headersToSign);
@@ -90,7 +90,7 @@ class OciSigningCoreTest {
                 "hello".getBytes(StandardCharsets.UTF_8),
                 true,
                 false,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                null
         );
 
         assertEquals(List.of("(request-target)", "date", "host"), prepared.headersToSign);
@@ -117,7 +117,7 @@ class OciSigningCoreTest {
                 null,
                 false,
                 false,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                null
         );
 
         String emptyHash = TestUtils.base64Sha256(new byte[0]);
@@ -147,7 +147,7 @@ class OciSigningCoreTest {
                 null,
                 false,
                 false,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                null
         );
 
         assertEquals(List.of("(request-target)", "x-date", "host"), prepared.headersToSign);

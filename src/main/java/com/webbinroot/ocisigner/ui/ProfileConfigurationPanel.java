@@ -12,10 +12,13 @@ import com.webbinroot.ocisigner.model.AuthType;
 import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.model.ProfileStore;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.isBlank;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.normalizeRegionId;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -24,7 +27,7 @@ import java.util.regex.Pattern;
  * Profile-level checkboxes are applied live for request handling.
  * Region and static credential fields commit on Save.
  */
-public class ProfileConfigurationPanel {
+public final class ProfileConfigurationPanel {
 
     private final JPanel root;
 
@@ -42,7 +45,7 @@ public class ProfileConfigurationPanel {
 
     private final JButton testCredentials = new JButton("Test Credentials");
     private final JLabel testCredentialsStatus = new JLabel("");
-    private static final String TEST_HEADER = "X-Oci-Signer-Test";
+    private static final String TEST_HEADER = OciRequestSigner.INTERNAL_TEST_HEADER;
     private static final Color STATUS_OK = new Color(0, 128, 0);
     private static final Color STATUS_FAIL = new Color(176, 0, 0);
     private static final Pattern OCI_REGION_PATTERN =
@@ -152,7 +155,7 @@ public class ProfileConfigurationPanel {
 
         testCredentials.addActionListener(e -> {
             if (currentProfile == null) {
-                logOutput("[OCI Signer][Test] No profile selected.");
+                OciDebug.log("[OCI Signer][Test] No profile selected.");
                 return;
             }
 
@@ -199,35 +202,41 @@ public class ProfileConfigurationPanel {
                         if (probeAttempted && ns == null) {
                             testCredentialsStatus.setForeground(STATUS_FAIL);
                             testCredentialsStatus.setText("Probe failed");
+                            testCredentialsStatus.setToolTipText(result);
                             statusLabel.setText("Status: Error");
                         } else if (ns != null) {
                             if (nsOk) {
                                 testCredentialsStatus.setForeground(STATUS_OK);
                                 testCredentialsStatus.setText("HTTP " + ns);
+                                testCredentialsStatus.setToolTipText(null);
                                 statusLabel.setText("Status: OK");
                             } else {
                                 testCredentialsStatus.setForeground(STATUS_FAIL);
                                 testCredentialsStatus.setText("HTTP " + ns);
+                                testCredentialsStatus.setToolTipText(result);
                                 statusLabel.setText("Status: Error");
                             }
                         } else if (ok) {
                             testCredentialsStatus.setForeground(STATUS_OK);
                             testCredentialsStatus.setText("OK");
+                            testCredentialsStatus.setToolTipText(null);
                             statusLabel.setText("Status: OK");
                         } else {
                             testCredentialsStatus.setForeground(STATUS_FAIL);
                             testCredentialsStatus.setText("Not Successful");
+                            testCredentialsStatus.setToolTipText(result);
                             statusLabel.setText("Status: Error");
                         }
 
                         if (result != null) {
-                            logOutput("[OCI Signer][Test] " + result);
+                            OciDebug.log("[OCI Signer][Test] " + result);
                         }
                     } catch (Exception ex) {
                         OciDebug.logStack("[OCI Signer][Test] Test credentials failed", ex);
                         statusLabel.setText("Status: Error");
                         testCredentialsStatus.setForeground(STATUS_FAIL);
                         testCredentialsStatus.setText("Not Successful");
+                        testCredentialsStatus.setToolTipText(ex.getMessage());
                         logError("[OCI Signer][Test] Test failed: " + ex.getMessage());
                     } finally {
                         testCredentials.setEnabled(true);
@@ -325,14 +334,6 @@ public class ProfileConfigurationPanel {
         return root;
     }
 
-    private void logOutput(String msg) {
-        try {
-            if (api != null && msg != null) {
-                api.logging().logToOutput(msg);
-            }
-        } catch (Exception ignored) {}
-    }
-
     private void logError(String msg) {
         try {
             if (api != null && msg != null) {
@@ -410,10 +411,6 @@ public class ProfileConfigurationPanel {
         return "Missing: " + String.join(", ", missing);
     }
 
-    private static boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
-    }
-
     private Integer sendNamespaceProbe(Profile p) {
         try {
             String region = effectiveRegionForTest(p);
@@ -431,7 +428,7 @@ public class ProfileConfigurationPanel {
 
             HttpService service = HttpService.httpService(host, 443, true);
             HttpRequest req = HttpRequest.httpRequest(service, raw);
-            logOutput("[OCI Signer][Test] Namespace probe -> " + host + "/n/ (via Montoya)");
+            OciDebug.log("[OCI Signer][Test] Namespace probe -> " + host + "/n/ (via Montoya)");
             HttpRequest signed = OciRequestSigner.sign(
                     req,
                     p,
@@ -443,19 +440,19 @@ public class ProfileConfigurationPanel {
             if (auth == null || auth.isBlank()) {
                 logError("[OCI Signer][Test] Namespace probe not signed (Authorization missing).");
             } else {
-                logOutput("[OCI Signer][Test] Namespace probe signed (auth len=" + auth.length() + ")");
+                OciDebug.log("[OCI Signer][Test] Namespace probe signed (auth len=" + auth.length() + ")");
             }
             HttpRequestResponse resp = api.http().sendRequest(signed);
             if (resp != null && resp.hasResponse()) {
                 short status = resp.response().statusCode();
-                logOutput("[OCI Signer][Test] Namespace probe status: HTTP " + status);
+                OciDebug.log("[OCI Signer][Test] Namespace probe status: HTTP " + status);
                 return (int) status;
             } else {
-                logOutput("[OCI Signer][Test] Namespace probe: no response");
+                OciDebug.log("[OCI Signer][Test] Namespace probe: no response");
                 return null;
             }
         } catch (Exception e) {
-            logOutput("[OCI Signer][Test] Namespace probe failed: " + e.getClass().getSimpleName()
+            OciDebug.log("[OCI Signer][Test] Namespace probe failed: " + e.getClass().getSimpleName()
                     + (e.getMessage() == null ? "" : (": " + e.getMessage())));
             logError("[OCI Signer][Test] Namespace probe failed: " + e.getMessage());
             return null;
@@ -473,21 +470,11 @@ public class ProfileConfigurationPanel {
         if (isBlank(p.configFilePath) || isBlank(p.configProfileName)) return "";
         try {
             OciConfigProfileResolver.ResolvedConfig resolved = OciConfigProfileResolver.resolve(p);
-            String cfgRegion = resolved.config == null ? "" : safeTrim(resolved.config.get("region"));
+            String cfgRegion = resolved.config == null ? "" : nz(resolved.config.get("region"));
             return normalizeRegionId(cfgRegion);
         } catch (Exception ignored) {
             return "";
         }
-    }
-
-    private static String safeTrim(String s) {
-        return s == null ? "" : s.trim();
-    }
-
-    private static String normalizeRegionId(String region) {
-        String v = safeTrim(region);
-        if (v.isEmpty()) return "";
-        return v.toLowerCase(Locale.ROOT);
     }
 
     private static boolean looksLikeOciRegionId(String region) {

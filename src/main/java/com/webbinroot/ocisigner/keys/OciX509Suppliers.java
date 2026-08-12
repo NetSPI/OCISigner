@@ -234,7 +234,8 @@ public final class OciX509Suppliers {
         }
     }
 
-    private static String describeSource(String source) {
+    // Public: also used by OciCrypto to describe leaf/RPST/key sources in debug logs.
+    public static String describeSource(String source) {
         if (source == null) return "(null)";
         String s = source.trim();
         if (s.isEmpty()) return "(empty)";

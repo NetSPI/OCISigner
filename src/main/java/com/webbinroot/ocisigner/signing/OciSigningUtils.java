@@ -2,18 +2,53 @@ package com.webbinroot.ocisigner.signing;
 
 import burp.api.montoya.http.message.HttpHeader;
 
+import static com.webbinroot.ocisigner.util.OciTokenUtils.isBlank;
+
+import java.nio.charset.StandardCharsets;
+import java.security.PrivateKey;
+import java.security.Signature;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Shared normalization helpers for signing.
  */
 public final class OciSigningUtils {
 
+    /** HTTP methods OCI's signing spec expects a body for. */
+    public static final Set<String> BODY_ALLOWED = Set.of("POST", "PUT", "PATCH");
+
     private OciSigningUtils() {}
+
+    /**
+     * Map an OCI "rsa-sha*" algorithm name to its JCA Signature algorithm name,
+     * or null if not one of the three supported RSA variants. Callers throw their
+     * own IllegalArgumentException with their own wording on a null result.
+     */
+    public static String rsaJcaAlgorithm(String algorithm) {
+        return switch (algorithm) {
+            case "rsa-sha256" -> "SHA256withRSA";
+            case "rsa-sha384" -> "SHA384withRSA";
+            case "rsa-sha512" -> "SHA512withRSA";
+            default -> null;
+        };
+    }
+
+    /**
+     * RSA-sign signingString with pk using the given JCA Signature algorithm
+     * (e.g. from rsaJcaAlgorithm()) and return the base64-encoded signature.
+     */
+    public static String signRsaBase64(PrivateKey pk, String jcaSigAlg, String signingString) throws Exception {
+        Signature s = Signature.getInstance(jcaSigAlg);
+        s.initSign(pk);
+        s.update(signingString.getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder().encodeToString(s.sign());
+    }
 
     /**
      * Normalize request-target (path + query) for signing.
@@ -99,6 +134,38 @@ public final class OciSigningUtils {
                 && !isBlank(seg[8]);
     }
 
+    /**
+     * True if any of x-content-sha256/content-type/content-length carries a
+     * non-blank value -- used to detect a caller-supplied Object Storage body
+     * header set (vs. relying on auto-computed ones).
+     */
+    public static boolean hasAnyObjectStorageBodyHeader(Map<String, List<String>> headers) {
+        if (headers == null) return false;
+        return hasHeaderValue(headers, "x-content-sha256")
+                || hasHeaderValue(headers, "content-type")
+                || hasHeaderValue(headers, "content-length");
+    }
+
+    /**
+     * True if the named header is present with at least one non-blank value.
+     */
+    public static boolean hasHeaderValue(Map<String, List<String>> headers, String name) {
+        List<String> vals = headers.get(name);
+        if (vals == null || vals.isEmpty()) return false;
+        for (String v : vals) {
+            if (v != null && !v.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * First value of a header multimap entry, or null if absent/empty.
+     */
+    public static String first(List<String> vals) {
+        if (vals == null || vals.isEmpty()) return null;
+        return vals.get(0);
+    }
+
     private static String normalizeHost(String host) {
         if (host == null) return "";
         String h = host.trim().toLowerCase(Locale.ROOT);
@@ -109,9 +176,5 @@ public final class OciSigningUtils {
         int at = h.lastIndexOf('@');
         if (at >= 0) h = h.substring(at + 1);
         return h;
-    }
-
-    private static boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
     }
 }

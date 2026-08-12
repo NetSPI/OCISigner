@@ -1,6 +1,5 @@
 package com.webbinroot.ocisigner.ui;
 
-import burp.api.montoya.MontoyaApi;
 import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.model.ProfileStore;
 
@@ -8,7 +7,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 
-public class GlobalSettingsPanel {
+public final class GlobalSettingsPanel {
 
     private final JPanel root;
 
@@ -21,7 +20,7 @@ public class GlobalSettingsPanel {
     /**
      * Build the global settings panel (signing enabled, always sign with, log level).
      */
-    public GlobalSettingsPanel(MontoyaApi api, ProfileStore store) {
+    public GlobalSettingsPanel(ProfileStore store) {
         root = new JPanel(new GridBagLayout());
         root.setBorder(new EmptyBorder(2, 2, 6, 2));
 

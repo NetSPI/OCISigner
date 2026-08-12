@@ -64,6 +64,15 @@ public class Profile {
     public String resourcePrincipalPrivateKey = "";
     public String resourcePrincipalPrivateKeyPassphrase = "";
 
+    // Delegation token (OBO) -- optional add-on for Instance Principal only (Oracle's
+    // SDKs only ship a dedicated delegation signer for instance principals). Attached
+    // as "opc-obo-token" on every request and included in the signed headers set; the
+    // underlying instance-principal signer still produces the signature. Value or file
+    // path (resolved via OciTokenUtils.resolveTokenValue, re-read on every sign -- so a
+    // rotating token like Cloud Shell's /etc/oci/delegation_token is picked up
+    // automatically).
+    public String delegationToken = "";
+
     // Static credentials
     public String tenancyOcid;
     public String userOcid;
@@ -77,6 +86,58 @@ public class Profile {
     public Profile(String name) {
         // Example input: "Prod"
         this.name = Objects.requireNonNull(name, "name");
+    }
+
+    /**
+     * Deep-ish copy for "Copy Profile": every configured input, none of the
+     * in-memory-only cached session state (that's tied to this profile's own
+     * cache key elsewhere, not something a copy should inherit).
+     */
+    public Profile copy(String newName) {
+        Profile c = new Profile(newName);
+
+        c.onlyInScope = this.onlyInScope;
+        c.updateTimestamp = this.updateTimestamp;
+        c.region = this.region;
+        c.onlyWithAuthHeader = this.onlyWithAuthHeader;
+        c.authType = this.authType;
+        c.signingMode = this.signingMode;
+
+        c.configFilePath = this.configFilePath;
+        c.configProfileName = this.configProfileName;
+
+        c.sessionToken = this.sessionToken;
+        c.sessionTenancyOcid = this.sessionTenancyOcid;
+        c.sessionFingerprint = this.sessionFingerprint;
+        c.sessionPrivateKeyPath = this.sessionPrivateKeyPath;
+        c.sessionPrivateKeyPassphrase = this.sessionPrivateKeyPassphrase;
+
+        c.instanceX509LeafCert = this.instanceX509LeafCert;
+        c.instanceX509LeafKey = this.instanceX509LeafKey;
+        c.instanceX509LeafKeyPassphrase = this.instanceX509LeafKeyPassphrase;
+        c.instanceX509IntermediateCerts = this.instanceX509IntermediateCerts;
+        c.instanceX509FederationEndpoint = this.instanceX509FederationEndpoint;
+        c.instanceX509TenancyOcid = this.instanceX509TenancyOcid;
+        c.federationProxyHost = this.federationProxyHost;
+        c.federationProxyPort = this.federationProxyPort;
+        c.federationProxyEnabled = this.federationProxyEnabled;
+        c.federationInsecureTls = this.federationInsecureTls;
+
+        c.resourcePrincipalRpst = this.resourcePrincipalRpst;
+        c.resourcePrincipalPrivateKey = this.resourcePrincipalPrivateKey;
+        c.resourcePrincipalPrivateKeyPassphrase = this.resourcePrincipalPrivateKeyPassphrase;
+
+        c.delegationToken = this.delegationToken;
+
+        c.tenancyOcid = this.tenancyOcid;
+        c.userOcid = this.userOcid;
+        c.fingerprint = this.fingerprint;
+        c.privateKeyPath = this.privateKeyPath;
+        c.privateKeyPassphrase = this.privateKeyPassphrase;
+
+        c.manualSettings = (this.manualSettings == null) ? null : this.manualSettings.copy();
+
+        return c;
     }
 
     public String name() { return name; }

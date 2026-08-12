@@ -1,13 +1,13 @@
 package com.webbinroot.ocisigner.signing;
 
-import com.webbinroot.ocisigner.auth.OciX509SessionManager;
-import com.webbinroot.ocisigner.keys.OciPrivateKeyCache;
+import com.webbinroot.ocisigner.model.AuthType;
 import com.webbinroot.ocisigner.model.ManualSigningSettings;
 import com.webbinroot.ocisigner.model.Profile;
+import com.webbinroot.ocisigner.util.OciTokenUtils;
 
-import java.nio.charset.StandardCharsets;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 import java.security.PrivateKey;
-import java.security.Signature;
 import java.util.*;
 
 /**
@@ -30,23 +30,6 @@ public final class OciSessionTokenSigner {
     }
 
     private OciSessionTokenSigner() {}
-
-    public static Result sign(Profile profile,
-                              OciX509SessionManager.SessionInfo session,
-                              ManualSigningSettings settings,
-                              String method,
-                              String requestTarget,
-                              String uriHost,
-                              Map<String, List<String>> headersIn,
-                              byte[] bodyBytes) {
-
-        // Example input: session.token="<JWT>", method="GET", requestTarget="/n/"
-        // Example output: Result.headersToApply contains Authorization (ST$ token)
-        Objects.requireNonNull(profile, "profile");
-        Objects.requireNonNull(session, "session");
-        return sign(profile, session.token, session.sessionPrivateKey, settings,
-                method, requestTarget, uriHost, headersIn, bodyBytes);
-    }
 
     public static Result sign(Profile profile,
                               String token,
@@ -79,7 +62,7 @@ public final class OciSessionTokenSigner {
                 bodyBytes,
                 objectStoragePutSpecial,
                 true,
-                OciSigningCore.BodyHeaderPolicy.INCLUDE_PRESENT
+                resolveDelegationToken(profile)
         );
 
         String signatureB64 = signBase64(sessionPrivateKey, settings, prep.signingString);
@@ -104,6 +87,22 @@ public final class OciSessionTokenSigner {
         return new Result(apply, prep.signingString, debug);
     }
 
+    /**
+     * Resolve the profile's delegation (OBO) token, gated to Instance Principal only
+     * (Oracle's SDKs only ship a dedicated delegation signer for instance principals).
+     * This function is the single choke point for ALL session-token signing (live
+     * signing, Test Credentials, Signature Calculator all funnel through it), so gating
+     * here -- rather than at each of those call sites -- is what keeps a stray
+     * Profile.delegationToken value from ever being applied to Resource Principal /
+     * Security Token / Config Profile signing, without having to duplicate the same
+     * auth-type check across every call site.
+     */
+    private static String resolveDelegationToken(Profile profile) {
+        if (profile.authType() != AuthType.INSTANCE_PRINCIPAL) return null;
+        String resolved = OciTokenUtils.resolveTokenValue(nz(profile.delegationToken));
+        return resolved.isBlank() ? null : resolved;
+    }
+
     private static String buildDebug(String method,
                                      String requestTarget,
                                      boolean considerBody,
@@ -124,32 +123,13 @@ public final class OciSessionTokenSigner {
     private static String signBase64(PrivateKey pk, ManualSigningSettings settings, String signingString) {
         try {
             String alg = nz(settings.algorithm).toLowerCase(Locale.ROOT);
-            String sigAlg;
-            switch (alg) {
-                case "rsa-sha256" -> sigAlg = "SHA256withRSA";
-                case "rsa-sha384" -> sigAlg = "SHA384withRSA";
-                case "rsa-sha512" -> sigAlg = "SHA512withRSA";
-                default -> throw new IllegalArgumentException("Session token signing only supports rsa-* algorithms.");
+            String sigAlg = OciSigningUtils.rsaJcaAlgorithm(alg);
+            if (sigAlg == null) {
+                throw new IllegalArgumentException("Session token signing only supports rsa-* algorithms.");
             }
-            Signature s = Signature.getInstance(sigAlg);
-            s.initSign(pk);
-            s.update(signingString.getBytes(StandardCharsets.UTF_8));
-            byte[] sig = s.sign();
-            return Base64.getEncoder().encodeToString(sig);
+            return OciSigningUtils.signRsaBase64(pk, sigAlg, signingString);
         } catch (Exception e) {
             throw new IllegalArgumentException("Session token signing failed: " + e.getMessage(), e);
         }
-    }
-
-    public static PrivateKey loadPrivateKeyFromPem(String keyPath, String passphrase) {
-        // Example input: "/home/kali/session_key.pem" -> PrivateKey
-        String p = nz(keyPath);
-        if (p.isBlank()) throw new IllegalArgumentException("Private key path is missing.");
-        return OciPrivateKeyCache.loadRsaPrivateKey(p, passphrase);
-    }
-
-
-    private static String nz(String s) {
-        return s == null ? "" : s.trim();
     }
 }

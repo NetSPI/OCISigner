@@ -1,6 +1,5 @@
 package com.webbinroot.ocisigner.signing;
 
-import burp.api.montoya.http.message.HttpHeader;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import com.oracle.bmc.http.client.io.DuplicatableInputStream;
 import com.oracle.bmc.http.signing.RequestSigner;
@@ -15,24 +14,25 @@ import com.webbinroot.ocisigner.model.Profile;
 import com.webbinroot.ocisigner.model.SigningMode;
 import com.webbinroot.ocisigner.util.OciHttpDebug;
 
-import java.lang.reflect.Method;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.URL;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Consumer;
 
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.BODY_ALLOWED;
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.hasAnyObjectStorageBodyHeader;
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.hasHeaderValue;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 public final class OciRequestSigner {
 
     private OciRequestSigner() {}
 
-    private static final Set<String> BODY_ALLOWED =
-            Set.of("POST", "PUT", "PATCH");
-    private static final String INTERNAL_TEST_HEADER = "X-Oci-Signer-Test";
+    public static final String INTERNAL_TEST_HEADER = "X-Oci-Signer-Test";
 
     private static final class SigningContext {
         final Profile profile;
@@ -40,7 +40,6 @@ public final class OciRequestSigner {
         final URI uri;
         final Map<String, List<String>> headerMultimap;
         final byte[] bodyBytes;
-        final Object bodyObj;
         final boolean sdkExcludeBodyStrategy;
         final boolean objectStoragePutSpecial;
         final String requestTarget;
@@ -53,7 +52,6 @@ public final class OciRequestSigner {
                        URI uri,
                        Map<String, List<String>> headerMultimap,
                        byte[] bodyBytes,
-                       Object bodyObj,
                        boolean sdkExcludeBodyStrategy,
                        boolean objectStoragePutSpecial,
                        String requestTarget,
@@ -65,7 +63,6 @@ public final class OciRequestSigner {
             this.uri = uri;
             this.headerMultimap = headerMultimap;
             this.bodyBytes = bodyBytes;
-            this.bodyObj = bodyObj;
             this.sdkExcludeBodyStrategy = sdkExcludeBodyStrategy;
             this.objectStoragePutSpecial = objectStoragePutSpecial;
             this.requestTarget = requestTarget;
@@ -101,21 +98,23 @@ public final class OciRequestSigner {
         // Example output (added by this signer):
         //   Date: Wed, 04 Mar 2026 01:30:11 GMT
         //   Authorization: Signature ... (rsa-sha256)
-        logInfo(infoLog, "[OCI Signer] Profile: " + profile.name()
-                + " | Auth: " + profile.authType()
-                + " | Mode: " + profile.signingMode
-                + " | InScopeOnly: " + profile.onlyInScope);
+        if (infoLog != null) {
+            logInfo(infoLog, "[OCI Signer] Profile: " + profile.name()
+                    + " | Auth: " + profile.authType()
+                    + " | Mode: " + profile.signingMode
+                    + " | InScopeOnly: " + profile.onlyInScope);
+        }
 
         logDebug(infoLog, debug, "[OCI Signer] ===== HTTP REQUEST BEFORE =====");
-        logDebug(infoLog, debug, OciHttpDebug.dumpMontoyaRequest(req));
+        if (debug) logDebug(infoLog, true, OciHttpDebug.dumpMontoyaRequest(req));
 
         HttpRequest working = req;
-        boolean forceSign = hasHeader(working, INTERNAL_TEST_HEADER);
+        boolean forceSign = working.hasHeader(INTERNAL_TEST_HEADER);
         if (forceSign) {
             working = removeHeader(working, INTERNAL_TEST_HEADER);
         }
 
-        if (!forceSign && profile.onlyWithAuthHeader && !hasHeader(working, "Authorization")) {
+        if (!forceSign && profile.onlyWithAuthHeader && !working.hasHeader("Authorization")) {
             logInfo(infoLog, "[OCI Signer] Skipped (no Authorization header present)");
             return working;
         }
@@ -125,8 +124,8 @@ public final class OciRequestSigner {
             String now = DateTimeFormatter.RFC_1123_DATE_TIME.format(
                     ZonedDateTime.now(java.time.ZoneOffset.UTC)
             );
-            boolean hasXDate = hasHeader(working, "x-date");
-            boolean hasDate = hasHeader(working, "date");
+            boolean hasXDate = working.hasHeader("x-date");
+            boolean hasDate = working.hasHeader("date");
 
             if (hasXDate) {
                 working = working.withUpdatedHeader("x-date", now);
@@ -145,8 +144,7 @@ public final class OciRequestSigner {
             String fixedPath = rawPath.replace("\"", "%22");
             logInfo(infoLog, "[OCI Signer] WARNING: Detected raw '\"' in URL. Encoding to %22 for signing.");
 
-            // Try to update request path if Montoya supports it (reflection keeps compile-safe)
-            working = tryWithPath(working, fixedPath);
+            working = working.withPath(fixedPath);
         }
 
         // Build URI for signing from scheme + host + path
@@ -154,7 +152,7 @@ public final class OciRequestSigner {
 
         // Avoid signing federation calls when proxying through Burp (prevents recursion / hangs).
         if (!forceSign && isFederationRequest(profile, uri)) {
-            logInfo(infoLog, "[OCI Signer] Skipped (federation endpoint): " + uri);
+            if (infoLog != null) logInfo(infoLog, "[OCI Signer] Skipped (federation endpoint): " + uri);
             return working;
         }
 
@@ -169,23 +167,7 @@ public final class OciRequestSigner {
             headerMultimap.putIfAbsent("host", List.of(host));
         }
 
-        Object bodyObj;
         byte[] bodyBytes = (working.body() == null) ? null : working.body().getBytes();
-
-        if (BODY_ALLOWED.contains(working.method().toUpperCase(Locale.ROOT))) {
-            String method = working.method().toUpperCase(Locale.ROOT);
-            byte[] sdkBodyBytes = (bodyBytes == null) ? new byte[0] : bodyBytes;
-            if ("PUT".equals(method) || "POST".equals(method)) {
-                // OCI SDK signer expects stream body types (not raw byte[]) for body hashing.
-                bodyObj = new ByteArrayDuplicatableInputStream(sdkBodyBytes);
-            } else {
-                bodyObj = (bodyBytes != null && bodyBytes.length > 0)
-                        ? new ByteArrayDuplicatableInputStream(sdkBodyBytes)
-                        : null;
-            }
-        } else {
-            bodyObj = null;
-        }
 
         String requestTarget = OciSigningUtils.normalizeRequestTarget(working.path());
         boolean objectStoragePutSpecial =
@@ -206,7 +188,6 @@ public final class OciRequestSigner {
                 uri,
                 headerMultimap,
                 bodyBytes,
-                bodyObj,
                 sdkExcludeBodyStrategy,
                 objectStoragePutSpecial,
                 requestTarget,
@@ -220,7 +201,7 @@ public final class OciRequestSigner {
             return strategy.sign(ctx);
         } catch (Exception ex) {
             logError(errorLog, infoLog, "[OCI Signer] Signing failed", ex);
-            logStack(infoLog, "[OCI Signer] Signing failed (stack)", ex);
+            com.webbinroot.ocisigner.util.OciDebug.logStackTo(infoLog, "[OCI Signer] Signing failed (stack)", ex);
             // Do not send partially mutated headers (e.g. updated date with stale auth).
             // Fall back to the exact original request object on signing failure.
             return req;
@@ -239,6 +220,11 @@ public final class OciRequestSigner {
         }
         if (at == AuthType.SECURITY_TOKEN) {
             return new SecurityTokenStrategy();
+        }
+        if (at == AuthType.INSTANCE_PRINCIPAL && !nz(ctx.profile.delegationToken).isBlank()) {
+            logInfo(ctx.infoLog, "[OCI Signer] WARNING: Delegation token is configured but no "
+                    + "explicit X.509 inputs are set, so this profile falls through to true "
+                    + "on-box SDK signing; opc-obo-token will NOT be applied.");
         }
         return new SdkStrategy();
     }
@@ -274,7 +260,7 @@ public final class OciRequestSigner {
                 HttpRequest out = applyHeaders(ctx.working, r.headersToApply);
 
                 logDebug(ctx.infoLog, ctx.debug, "[OCI Signer] ===== FINAL HTTP REQUEST =====");
-                logDebug(ctx.infoLog, ctx.debug, OciHttpDebug.dumpMontoyaRequest(out));
+                if (ctx.debug) logDebug(ctx.infoLog, true, OciHttpDebug.dumpMontoyaRequest(out));
                 return out;
             }
 
@@ -370,8 +356,10 @@ public final class OciRequestSigner {
     private static final class SdkStrategy implements SignerStrategy {
         @Override
         public HttpRequest sign(SigningContext ctx) throws Exception {
-            logInfo(ctx.infoLog, "[OCI Signer] SDK signing using auth type: " + ctx.profile.authType()
-                    + " | thread=" + Thread.currentThread().getName());
+            if (ctx.infoLog != null) {
+                logInfo(ctx.infoLog, "[OCI Signer] SDK signing using auth type: " + ctx.profile.authType()
+                        + " | thread=" + Thread.currentThread().getName());
+            }
 
             AuthType at = (ctx.profile.authType() == null) ? AuthType.API_KEY : ctx.profile.authType();
             if (ctx.objectStoragePutSpecial && (at == AuthType.API_KEY || at == AuthType.CONFIG_PROFILE)) {
@@ -379,10 +367,12 @@ public final class OciRequestSigner {
                 return signObjectStorageSpecialManual(ctx);
             }
 
+            Object bodyObj = buildSdkBodyObj(ctx.bodyBytes, ctx.working.method());
+
             long startNs = System.nanoTime();
             RequestSigner signer = OciCrypto.sdkSignerFor(ctx.profile, ctx.sdkExcludeBodyStrategy);
             logDebug(ctx.infoLog, ctx.debug, "[OCI Signer] SDK body object class: "
-                    + (ctx.bodyObj == null ? "null" : ctx.bodyObj.getClass().getName()));
+                    + (bodyObj == null ? "null" : bodyObj.getClass().getName()));
 
             Map<String, String> signedHeaders;
             Thread t = Thread.currentThread();
@@ -395,7 +385,7 @@ public final class OciRequestSigner {
                         ctx.uri,
                         ctx.working.method(),
                         ctx.headerMultimap,
-                        ctx.bodyObj
+                        bodyObj
                 );
             } finally {
                 t.setContextClassLoader(prev);
@@ -411,7 +401,7 @@ public final class OciRequestSigner {
             HttpRequest out = applyHeaders(ctx.working, signedHeaders);
 
             logDebug(ctx.infoLog, ctx.debug, "[OCI Signer] ===== FINAL HTTP REQUEST =====");
-            logDebug(ctx.infoLog, ctx.debug, OciHttpDebug.dumpMontoyaRequest(out));
+            if (ctx.debug) logDebug(ctx.infoLog, true, OciHttpDebug.dumpMontoyaRequest(out));
 
             return out;
         }
@@ -495,7 +485,7 @@ public final class OciRequestSigner {
 
         HttpRequest out = applyHeaders(ctx.working, r.headersToApply);
         logDebug(ctx.infoLog, ctx.debug, "[OCI Signer] ===== FINAL HTTP REQUEST =====");
-        logDebug(ctx.infoLog, ctx.debug, OciHttpDebug.dumpMontoyaRequest(out));
+        if (ctx.debug) logDebug(ctx.infoLog, true, OciHttpDebug.dumpMontoyaRequest(out));
         return out;
     }
 
@@ -511,33 +501,31 @@ public final class OciRequestSigner {
         return OciSessionTokenResolver.fromSecurityToken(ctx.profile, ctx.infoLog, ctx.errorLog);
     }
 
-    private static HttpRequest tryWithPath(HttpRequest req, String newPath) {
-        try {
-            Method m = req.getClass().getMethod("withPath", String.class);
-            Object out = m.invoke(req, newPath);
-            if (out instanceof HttpRequest) return (HttpRequest) out;
-        } catch (Exception ignored) {}
-        return req;
-    }
-
     private static URI buildUriForSigning(HttpRequest req) {
-        String scheme = "https";
-        String host = safe(req.headerValue("Host"));
-
-        // Try to use req.url() if it is a java.net.URL (older Montoya)
-        try {
-            Object u = req.url();
-            if (u instanceof URL) {
-                scheme = ((URL) u).getProtocol();
-                if (host.isBlank()) host = ((URL) u).getHost();
-            }
-        } catch (Exception ignored) {}
-
+        String host = nz(req.headerValue("Host"));
         if (host.isBlank()) host = "localhost";
 
         String path = OciSigningUtils.normalizeRequestTarget(req.path());
 
-        return URI.create(scheme + "://" + host + path);
+        return URI.create("https://" + host + path);
+    }
+
+    /**
+     * Wrap the body for the OCI SDK signer, which expects a duplicatable stream (not a
+     * raw byte[]) for body hashing. Only SdkStrategy needs this -- kept out of
+     * SigningContext so manual-mode signing (the common case) never builds it.
+     */
+    private static Object buildSdkBodyObj(byte[] bodyBytes, String method) {
+        if (!BODY_ALLOWED.contains(method.toUpperCase(Locale.ROOT))) return null;
+
+        String upperMethod = method.toUpperCase(Locale.ROOT);
+        byte[] sdkBodyBytes = (bodyBytes == null) ? new byte[0] : bodyBytes;
+        if ("PUT".equals(upperMethod) || "POST".equals(upperMethod)) {
+            return new ByteArrayDuplicatableInputStream(sdkBodyBytes);
+        }
+        return (bodyBytes != null && bodyBytes.length > 0)
+                ? new ByteArrayDuplicatableInputStream(sdkBodyBytes)
+                : null;
     }
 
     private static boolean isFederationRequest(Profile profile, URI uri) {
@@ -547,8 +535,8 @@ public final class OciRequestSigner {
             return false;
         }
 
-        String host = safe(uri.getHost()).toLowerCase(Locale.ROOT);
-        String path = safe(uri.getPath()).toLowerCase(Locale.ROOT);
+        String host = nz(uri.getHost()).toLowerCase(Locale.ROOT);
+        String path = nz(uri.getPath()).toLowerCase(Locale.ROOT);
         if (host.isBlank()) return false;
 
         // Always skip federation token calls to /v1/x509 to avoid recursion.
@@ -562,11 +550,11 @@ public final class OciRequestSigner {
         }
 
         // Also match explicit federation endpoint if user provided one.
-        String fed = safe(profile.instanceX509FederationEndpoint);
+        String fed = nz(profile.instanceX509FederationEndpoint);
         if (!fed.isBlank()) {
             try {
                 URI fedUri = URI.create(fed);
-                String fedHost = safe(fedUri.getHost()).toLowerCase(Locale.ROOT);
+                String fedHost = nz(fedUri.getHost()).toLowerCase(Locale.ROOT);
                 if (!fedHost.isBlank() && fedHost.equals(host)) {
                     return true;
                 }
@@ -584,7 +572,7 @@ public final class OciRequestSigner {
             String val = e.getValue();
             if (name != null && val != null) {
                 String headerName = normalizeHeaderName(name);
-                if (hasHeader(out, headerName)) {
+                if (out.hasHeader(headerName)) {
                     out = out.withUpdatedHeader(headerName, val);
                 } else {
                     try {
@@ -609,18 +597,6 @@ public final class OciRequestSigner {
         return n;
     }
 
-    private static boolean hasHeader(HttpRequest req, String name) {
-        if (req == null || name == null) return false;
-        String target = name.trim().toLowerCase(Locale.ROOT);
-        for (HttpHeader h : req.headers()) {
-            if (h == null || h.name() == null) continue;
-            if (h.name().trim().toLowerCase(Locale.ROOT).equals(target)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static HttpRequest removeHeader(HttpRequest req, String name) {
         if (req == null || name == null) return req;
         try {
@@ -631,7 +607,7 @@ public final class OciRequestSigner {
     }
 
     private static void logInfo(Consumer<String> log, String msg) {
-        if (log != null && msg != null) log.accept(msg);
+        com.webbinroot.ocisigner.util.OciDebug.logTo(log, msg);
     }
 
     private static void logDebug(Consumer<String> log, boolean debug, String msg) {
@@ -639,49 +615,9 @@ public final class OciRequestSigner {
     }
 
     private static void logError(Consumer<String> errorLog, Consumer<String> infoLog, String msg, Throwable t) {
-        String detail = (t == null) ? "" : (" :: " + t.getClass().getSimpleName() + ": " + t.getMessage());
-        if (errorLog != null) errorLog.accept(msg + detail);
-        if (infoLog != null) infoLog.accept(msg + detail);
+        com.webbinroot.ocisigner.util.OciDebug.logErrorTo(errorLog, infoLog, msg, t);
     }
 
-    private static void logStack(Consumer<String> log, String msg, Throwable t) {
-        if (log == null) return;
-        if (t == null) {
-            log.accept(msg);
-            return;
-        }
-        log.accept(msg + " :: " + t.getClass().getSimpleName() + ": " + t.getMessage());
-        StackTraceElement[] st = t.getStackTrace();
-        int max = Math.min(st.length, 60);
-        for (int i = 0; i < max; i++) {
-            log.accept("    at " + st[i]);
-        }
-        Throwable cause = t.getCause();
-        if (cause != null && cause != t) {
-            log.accept("Caused by: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
-            StackTraceElement[] st2 = cause.getStackTrace();
-            int max2 = Math.min(st2.length, 30);
-            for (int i = 0; i < max2; i++) {
-                log.accept("    at " + st2[i]);
-            }
-        }
-    }
-
-    private static boolean hasAnyObjectStorageBodyHeader(Map<String, List<String>> headers) {
-        if (headers == null) return false;
-        return hasHeaderValue(headers, "x-content-sha256")
-                || hasHeaderValue(headers, "content-type")
-                || hasHeaderValue(headers, "content-length");
-    }
-
-    private static boolean hasHeaderValue(Map<String, List<String>> headers, String name) {
-        List<String> vals = headers.get(name);
-        if (vals == null || vals.isEmpty()) return false;
-        for (String v : vals) {
-            if (v != null && !v.trim().isEmpty()) return true;
-        }
-        return false;
-    }
 
     /**
      * Duplicatable body stream for OCI SDK body-signing paths.
@@ -735,9 +671,5 @@ public final class OciRequestSigner {
         public InputStream duplicate() {
             return new ByteArrayInputStream(bytes);
         }
-    }
-
-    private static String safe(String s) {
-        return s == null ? "" : s.trim();
     }
 }

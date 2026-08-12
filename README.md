@@ -24,12 +24,12 @@ Review the GitHub wiki for an in-depth review of each authentication mechanism, 
 Requirements:
 - Burp Suite (Montoya API compatible)
 - Java 21+ for local builds (default minimum target is Java 21)
-- Release artifacts may include up to JDK 25 builds; use a lower-target jar (for example JDK 21) if your Burp runtime is older.
+- Release artifacts may include up to JDK 26 builds; use a lower-target jar (for example JDK 21) if your Burp runtime is older.
 
 ### Option 1: Install from GitHub Releases
 1. Download the latest release jar matching your runtime from:
    - https://github.com/NetSPI/OCISigner/releases
-   - Example: use `*-jdk25.jar` if Burp runs on Java 25; use `*-jdk21.jar` if Burp runs on Java 21.
+   - Example: use `*-jdk26.jar` if Burp runs on Java 26; use `*-jdk21.jar` if Burp runs on Java 21.
 2. In Burp Suite, go to `Extensions` -> `Installed` -> `Add`.
 3. Set `Extension type` to `Java` and select the downloaded jar.
 
@@ -76,10 +76,11 @@ Requirements:
 | `net.portswigger.burp.extensions:montoya-api:2026.7` | Burp extension entrypoint + UI panels + request hooks | Burp Suite extension API (UI, request handling, proxy integration). |
 | `org.bouncycastle:bcprov-jdk18on:1.85` | Key parsing + crypto primitives | PEM and RSA key handling for signing. |
 | `org.bouncycastle:bcpkix-jdk18on:1.85` | X.509 handling | Certificate parsing and chain handling for instance principal federation. |
-| `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.93.0` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
+| `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.94.1` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
 | `tools.jackson.core:jackson-databind:3.2.1` | Token parsing + JWT helpers | JSON parsing for token responses and JWT claim extraction (Jackson 3; `jackson-annotations` stays on the legacy `com.fasterxml.jackson.core` group upstream). |
-| `org.junit.jupiter:junit-jupiter:6.1.2`* | Unit tests only | JUnit 5 test framework (unit tests and assertions). |
+| `org.junit.jupiter:junit-jupiter:6.1.3`* | Unit tests only | JUnit 5 test framework (unit tests and assertions). |
 | `org.slf4j:slf4j-simple:2.0.18`* | Unit tests only | SLF4J binding to show logs during tests. |
+| `org.mockito:mockito-core:5.23.0`* | Unit tests only | Mocks Montoya's `HttpRequest` (its own factories require a live Burp instance) to test the request-signing entry point directly. |
 
 *Test-scoped dependency.
 

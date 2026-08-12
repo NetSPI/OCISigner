@@ -19,6 +19,12 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.BODY_ALLOWED;
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.first;
+import static com.webbinroot.ocisigner.signing.OciSigningUtils.hasAnyObjectStorageBodyHeader;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.isBlank;
+import static com.webbinroot.ocisigner.util.OciTokenUtils.nz;
+
 /**
  * Signature Calculator (SDK-backed + Manual/custom).
  *
@@ -58,7 +64,6 @@ public final class OciSignatureCalculator {
         }
     }
 
-    private static final Set<String> BODY_ALLOWED = Set.of("POST", "PUT", "PATCH");
     private static final DateTimeFormatter RFC1123 = DateTimeFormatter.RFC_1123_DATE_TIME;
 
     private OciSignatureCalculator() {}
@@ -226,24 +231,7 @@ public final class OciSignatureCalculator {
         if (mode == SigningMode.MANUAL) {
 
             if (authType == AuthType.API_KEY) {
-                OciManualSigner.Result r = OciManualSigner.sign(
-                        profile,
-                        manualSettings,
-                        req.method,
-                        requestTarget,
-                        uri.getHost(),
-                        headerMultimap,
-                        bodyBytes
-                );
-                String authVal = r.headersToApply.get("authorization");
-                if (authVal == null || authVal.isBlank()) {
-                    throw new IllegalStateException("Manual signer did not return an Authorization header.");
-                }
-                String signedHeadersList = extractQuotedParam(authVal, "headers");
-                if (signedHeadersList == null) signedHeadersList = "";
-                String signingString = (r.signingString == null) ? "" : r.signingString;
-                String debug = r.debugText == null ? "" : r.debugText;
-                return new Result(authVal, signingString, signedHeadersList, debug);
+                return manualApiKeySignAndWrap(profile, manualSettings, req, requestTarget, uri, headerMultimap, bodyBytes);
             }
 
             if (authType == AuthType.SECURITY_TOKEN) {
@@ -288,25 +276,7 @@ public final class OciSignatureCalculator {
                     }
 
                     Profile tmp = OciConfigProfileResolver.apiKeyProfileFromConfig(resolved.config);
-
-                    OciManualSigner.Result r = OciManualSigner.sign(
-                            tmp,
-                            manualSettings,
-                            req.method,
-                            requestTarget,
-                            uri.getHost(),
-                            headerMultimap,
-                            bodyBytes
-                    );
-                    String authVal = r.headersToApply.get("authorization");
-                    if (authVal == null || authVal.isBlank()) {
-                        throw new IllegalStateException("Manual signer did not return an Authorization header.");
-                    }
-                    String signedHeadersList = extractQuotedParam(authVal, "headers");
-                    if (signedHeadersList == null) signedHeadersList = "";
-                    String signingString = (r.signingString == null) ? "" : r.signingString;
-                    String debug = r.debugText == null ? "" : r.debugText;
-                    return new Result(authVal, signingString, signedHeadersList, debug);
+                    return manualApiKeySignAndWrap(tmp, manualSettings, req, requestTarget, uri, headerMultimap, bodyBytes);
                 } catch (Exception e) {
                     throw new IllegalArgumentException("Manual signing failed for Config Profile: " + e.getMessage(), e);
                 }
@@ -423,6 +393,33 @@ public final class OciSignatureCalculator {
         if (signedHeadersList == null) signedHeadersList = "";
         String debug = buildSessionTokenDebug(profile, req, uri, authVal, signedHeadersList, r.signingString, r.debugText);
         return new Result(authVal, r.signingString, signedHeadersList, debug);
+    }
+
+    private static Result manualApiKeySignAndWrap(Profile signingProfile,
+                                                   ManualSigningSettings settings,
+                                                   ParsedRequest req,
+                                                   String requestTarget,
+                                                   URI uri,
+                                                   Map<String, List<String>> headerMultimap,
+                                                   byte[] bodyBytes) {
+        OciManualSigner.Result r = OciManualSigner.sign(
+                signingProfile,
+                settings,
+                req.method,
+                requestTarget,
+                uri.getHost(),
+                headerMultimap,
+                bodyBytes
+        );
+        String authVal = r.headersToApply.get("authorization");
+        if (authVal == null || authVal.isBlank()) {
+            throw new IllegalStateException("Manual signer did not return an Authorization header.");
+        }
+        String signedHeadersList = extractQuotedParam(authVal, "headers");
+        if (signedHeadersList == null) signedHeadersList = "";
+        String signingString = (r.signingString == null) ? "" : r.signingString;
+        String debug = r.debugText == null ? "" : r.debugText;
+        return new Result(authVal, signingString, signedHeadersList, debug);
     }
 
     // ------------------------------------------------------------------------
@@ -705,34 +702,5 @@ public final class OciSignatureCalculator {
             }
         }
         return null;
-    }
-
-    private static String first(List<String> vals) {
-        if (vals == null || vals.isEmpty()) return null;
-        return vals.get(0);
-    }
-
-    private static boolean hasAnyObjectStorageBodyHeader(Map<String, List<String>> headers) {
-        if (headers == null) return false;
-        return hasHeaderValue(headers, "x-content-sha256")
-                || hasHeaderValue(headers, "content-type")
-                || hasHeaderValue(headers, "content-length");
-    }
-
-    private static boolean hasHeaderValue(Map<String, List<String>> headers, String name) {
-        List<String> vals = headers.get(name);
-        if (vals == null || vals.isEmpty()) return false;
-        for (String v : vals) {
-            if (v != null && !v.trim().isEmpty()) return true;
-        }
-        return false;
-    }
-
-    private static String nz(String s) {
-        return (s == null) ? "" : s.trim();
-    }
-
-    private static boolean isBlank(String s) {
-        return s == null || s.trim().isEmpty();
     }
 }

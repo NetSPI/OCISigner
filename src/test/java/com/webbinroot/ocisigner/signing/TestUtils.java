@@ -1,5 +1,8 @@
 package com.webbinroot.ocisigner.signing;
 
+import com.webbinroot.ocisigner.model.Profile;
+import com.webbinroot.ocisigner.util.OciTokenUtils;
+
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -78,6 +81,19 @@ final class TestUtils {
         return new KeyPair(FIXED_PUBLIC_KEY, FIXED_PRIVATE_KEY);
     }
 
+    static Profile apiKeyProfile(String name) {
+        return apiKeyProfile(name, "11:22:33:44:55:66:77");
+    }
+
+    static Profile apiKeyProfile(String name, String fingerprint) {
+        Profile p = new Profile(name);
+        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
+        p.userOcid = "ocid1.user.oc1..testuser";
+        p.fingerprint = fingerprint;
+        p.privateKeyPath = FIXED_PRIVATE_KEY_PEM;
+        return p;
+    }
+
 
     private static PrivateKey loadFixedPrivateKey() {
         try {
@@ -88,8 +104,7 @@ final class TestUtils {
     }
 
     static String base64Sha256(byte[] data) throws Exception {
-        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-        return Base64.getEncoder().encodeToString(md.digest(data));
+        return OciTokenUtils.base64Sha256(data);
     }
 
     static void verifySignature(String authorizationHeader,

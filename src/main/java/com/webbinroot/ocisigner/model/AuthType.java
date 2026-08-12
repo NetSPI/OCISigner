@@ -1,9 +1,9 @@
 package com.webbinroot.ocisigner.model;
 
 public enum AuthType {
-    API_KEY("API Key"),
-    SECURITY_TOKEN("Security Token (Session)"),
     CONFIG_PROFILE("Config Profile (Auto)"),
+    API_KEY("API Key"),
+    SECURITY_TOKEN("Session Token"),
     INSTANCE_PRINCIPAL("Instance Principal"),
     RESOURCE_PRINCIPAL("Resource Principal");
 

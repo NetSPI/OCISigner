@@ -18,13 +18,8 @@ class ApiKeySigningTest {
     @Test
     void get_noBody_signingString_and_signature_valid() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
 
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "11:22:33:44:55:66:77";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 
@@ -59,13 +54,8 @@ class ApiKeySigningTest {
     @Test
     void post_withBody_addsBodyHeaders_and_signature_valid() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
 
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "aa:bb:cc:dd:ee";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key", "aa:bb:cc:dd:ee");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 
@@ -111,13 +101,7 @@ class ApiKeySigningTest {
     // Get withBody disallowed ignores body headers
     @Test
     void get_withBody_disallowed_ignores_body_headers() throws Exception {
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "ff:ee:dd:cc:bb";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key", "ff:ee:dd:cc:bb");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 
@@ -139,13 +123,7 @@ class ApiKeySigningTest {
     // Extra headers are included in signing string
     @Test
     void extra_headers_are_included_in_signing_string() throws Exception {
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "12:34:56";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key", "12:34:56");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
         ms.extraSignedHeaders = "opc-request-id\nx-custom";
@@ -181,13 +159,8 @@ class ApiKeySigningTest {
     // Disable date removes date from signing string
     @Test
     void disable_date_removes_date_from_signing_string() throws Exception {
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "de:ad:be:ef";
-        p.privateKeyPath = keyPath;
+        KeyPair kp = TestUtils.fixedKeyPair();
+        Profile p = TestUtils.apiKeyProfile("api-key", "de:ad:be:ef");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
         ms.signDate = false;
@@ -213,18 +186,13 @@ class ApiKeySigningTest {
                 TestUtils.SIG_API_NO_DATE
         );
         assertEquals(expectedAuth, r.headersToApply.get("authorization"));
+        TestUtils.verifySignature(r.headersToApply.get("authorization"), r.signingString, kp.getPublic(), "rsa-sha256");
     }
 
     @Test
     void x_date_takes_precedence_over_date_when_both_present() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "de:ad:be:ef";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key", "de:ad:be:ef");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 
@@ -251,13 +219,7 @@ class ApiKeySigningTest {
     @Test
     void post_empty_body_still_signs_required_body_headers() throws Exception {
         KeyPair kp = TestUtils.fixedKeyPair();
-        String keyPath = TestUtils.FIXED_PRIVATE_KEY_PEM;
-
-        Profile p = new Profile("api-key");
-        p.tenancyOcid = "ocid1.tenancy.oc1..testtenancy";
-        p.userOcid = "ocid1.user.oc1..testuser";
-        p.fingerprint = "aa:bb:cc:dd:ee";
-        p.privateKeyPath = keyPath;
+        Profile p = TestUtils.apiKeyProfile("api-key", "aa:bb:cc:dd:ee");
 
         ManualSigningSettings ms = ManualSigningSettings.defaultsLikeSdk();
 

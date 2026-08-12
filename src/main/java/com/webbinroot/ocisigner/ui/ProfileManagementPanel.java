@@ -9,7 +9,7 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.util.Objects;
 
-public class ProfileManagementPanel {
+public final class ProfileManagementPanel {
 
     private final JPanel root;
     private final DefaultListModel<Profile> listModel = new DefaultListModel<>();
@@ -93,7 +93,7 @@ public class ProfileManagementPanel {
                 Profile sel = profileList.getSelectedValue();
                 if (sel != null && store.selected() != sel) {
                     store.select(sel);
-                    store.changed("ui.profileSelected", sel);
+                    store.changed("ui.profileSelected");
                     globalPanel.refreshProfiles(store);
                 }
             }

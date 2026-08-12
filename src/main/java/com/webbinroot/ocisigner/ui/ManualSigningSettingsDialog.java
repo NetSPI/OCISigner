@@ -5,9 +5,8 @@ import com.webbinroot.ocisigner.model.ManualSigningSettings;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.io.File;
 
-public class ManualSigningSettingsDialog extends JDialog {
+public final class ManualSigningSettingsDialog extends JDialog {
 
     public static final class DialogResult {
         public final boolean saved;
@@ -221,27 +220,15 @@ public class ManualSigningSettingsDialog extends JDialog {
         computeMissingXContentSha256.addActionListener(e -> updateUi.run());
         computeMissingContentLength.addActionListener(e -> updateUi.run());
 
-        extraHeaders.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { updateUi.run(); }
-            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { updateUi.run(); }
-            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { updateUi.run(); }
-        });
+        extraHeaders.getDocument().addDocumentListener(SimpleDocListener.onChange(updateUi::run));
 
         hmacTextMode.addActionListener(e -> updateUi.run());
         hmacFileMode.addActionListener(e -> updateUi.run());
 
-        hmacBrowse.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Select HMAC Key File");
-            int r = fc.showOpenDialog(hmacPanel);
-            if (r == JFileChooser.APPROVE_OPTION) {
-                File f = fc.getSelectedFile();
-                if (f != null) {
-                    hmacKeyFile.setText(f.getAbsolutePath());
-                    updateUi.run();
-                }
-            }
-        });
+        hmacBrowse.addActionListener(e -> UiStyles.browseForFile(hmacPanel, "Select HMAC Key File", path -> {
+            hmacKeyFile.setText(path);
+            updateUi.run();
+        }));
 
         updateUi.run();
 
@@ -323,10 +310,7 @@ public class ManualSigningSettingsDialog extends JDialog {
         c.gridx = 0; c.gridy = row; c.weightx = 0; c.fill = GridBagConstraints.NONE;
         hmacPanel.add(hmacFileMode, c);
 
-        JPanel fileRow = new JPanel(new BorderLayout(6, 0));
-        fileRow.setOpaque(false);
-        fileRow.add(hmacKeyFile, BorderLayout.CENTER);
-        fileRow.add(hmacBrowse, BorderLayout.EAST);
+        JPanel fileRow = UiStyles.rowWithButton(hmacKeyFile, hmacBrowse);
 
         c.gridx = 1; c.gridy = row; c.weightx = 1.0; c.fill = GridBagConstraints.HORIZONTAL;
         hmacPanel.add(fileRow, c);

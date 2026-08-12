@@ -64,7 +64,7 @@ public final class OciKeyLoader {
     }
 
     /**
-     * Clear in-memory key cache (no disk side-effects).
+     * Drop all cached PEM bytes. Called on extension unload.
      */
     public void clear() {
         cache.clear();
