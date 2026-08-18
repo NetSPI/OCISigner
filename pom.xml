@@ -6,7 +6,7 @@
 
     <groupId>com.webbinroot</groupId>
     <artifactId>OCISigner</artifactId>
-    <version>0.6.0</version>
+    <version>1.0.0</version>
     <name>OCISigner</name>
     <packaging>jar</packaging>
 
