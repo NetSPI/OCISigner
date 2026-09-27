@@ -276,14 +276,21 @@ public final class ImportProfilesDialog extends JDialog {
             Profile p = store.addImportedProfile(uniqueProfileName(c.section));
 
             // Credentials
-            p.setAuthType(AuthType.API_KEY);
+            // Config Profile (Auto) re-reads the config file at sign time and
+            // auto-detects API-key-backed vs session-token-backed sections via
+            // OciConfigProfileResolver.hasSecurityToken() -- unlike API_KEY, which
+            // has no concept of security_token_file at all and would silently
+            // misconfigure any imported session-token section as a raw API key.
+            p.setAuthType(AuthType.CONFIG_PROFILE);
             p.signingMode = SigningMode.SDK;
 
-            // Values
-            p.userOcid = nz(c.user);
-            p.tenancyOcid = nz(c.tenancy);
-            p.fingerprint = nz(c.fingerprint);
-            p.privateKeyPath = nz(c.keyFile);
+            // Note: deliberately NOT copying c.user/c.tenancy/c.fingerprint/c.keyFile
+            // onto p.userOcid/p.tenancyOcid/p.fingerprint/p.privateKeyPath here.
+            // Config Profile (Auto) never reads those fields -- OciConfigProfileResolver
+            // re-parses configFilePath+configProfileName fresh at sign time -- so
+            // populating them was dead data that only ever surfaced, stale and
+            // misleading, if a user manually switched the imported profile's Auth Type
+            // to API Key afterward.
 
             // Helpers
             p.region = nz(c.region);

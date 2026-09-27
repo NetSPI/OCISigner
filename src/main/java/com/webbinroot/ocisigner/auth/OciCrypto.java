@@ -44,6 +44,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.net.ssl.SSLContext;
 
@@ -93,6 +94,26 @@ public final class OciCrypto {
             return SIGNER_CACHE.compute(key, (k, existing) -> withContextClassLoader(() -> {
                 RequestSigner signer = buildSigner(p, excludeBodyStrategy);
                 SESSION_TOKEN_HASH.put(k, tokenHash);
+                return signer;
+            }));
+        }
+
+        if (type == AuthType.CONFIG_PROFILE) {
+            // configFilePath/configProfileName/region (the cache key below) never change
+            // when `oci session authenticate` rotates a session's key pair + token in
+            // place, so without this check the cache would hold onto the signer built
+            // from the *first* refresh forever, same bug class as SECURITY_TOKEN above.
+            String contentHash = configProfileContentHash(p);
+            String cachedHash = SESSION_TOKEN_HASH.get(key);
+            RequestSigner cached = SIGNER_CACHE.get(key);
+            if (cached != null && Objects.equals(cachedHash, contentHash)) {
+                OciDebug.debug("[OCI Signer][Signer] Cache hit for key=" + key + " (config profile)");
+                return cached;
+            }
+            OciDebug.debug("[OCI Signer][Signer] Cache miss for key=" + key + " (config profile)");
+            return SIGNER_CACHE.compute(key, (k, existing) -> withContextClassLoader(() -> {
+                RequestSigner signer = buildSigner(p, excludeBodyStrategy);
+                SESSION_TOKEN_HASH.put(k, contentHash);
                 return signer;
             }));
         }
@@ -348,19 +369,36 @@ public final class OciCrypto {
                     && OciX509SessionManager.hasInstanceX509Inputs(p)) {
                 String provided = nz(p.cachedSessionToken);
                 if (!provided.isBlank()) {
-                    OciDebug.info("[OCI Signer][Test] Using provided instance session token for namespace test.");
-                    String token = OciTokenUtils.resolveTokenValue(provided);
                     OciX509SessionManager.SessionInfo cached = OciX509SessionManager.peek(p);
-                    if (cached == null || cached.sessionPrivateKey == null) {
-                        return "FAILED (session token provided but no cached session private key; click Refresh Token)";
+                    if (cached != null && cached.sessionPrivateKey != null) {
+                        OciDebug.info("[OCI Signer][Test] Using provided instance session token for namespace test.");
+                        String token = OciTokenUtils.resolveTokenValue(provided);
+                        return testNamespaceWithSessionToken(p, token, cached.sessionPrivateKey);
                     }
-                    return testNamespaceWithSessionToken(p, token, cached.sessionPrivateKey);
+                    // Falls through to federate below instead of failing here -- this is
+                    // reached whenever the cached token doesn't match the *current*
+                    // federation config (e.g. Leaf Cert/Key or Federation Endpoint was
+                    // just changed, which changes the cache key), not just when the
+                    // cache was cleared. Re-federating is the right response either way.
+                    OciDebug.info("[OCI Signer][Test] Cached instance session token doesn't match the "
+                            + "current federation config; re-federating.");
                 }
 
                 OciDebug.info("[OCI Signer][Test] Using manual X509 federation (session token).");
-                OciX509SessionManager.SessionInfo s = OciX509SessionManager.refresh(p, OciDebug::info, OciDebug::info);
+                String[] lastError = new String[1];
+                Consumer<String> errorLog = msg -> {
+                    lastError[0] = msg;
+                    OciDebug.info(msg);
+                };
+                OciX509SessionManager.SessionInfo s = OciX509SessionManager.refresh(p, OciDebug::info, errorLog);
                 if (s == null || s.token == null || s.sessionPrivateKey == null) {
-                    return "FAILED (manual X509 token refresh failed)";
+                    String detail = (lastError[0] == null) ? "manual X509 token refresh failed"
+                            : OciX509SessionManager.stripInternalLogPrefix(lastError[0]);
+                    // No outer "FAILED (...)" wrapping here (unlike the other FAILED
+                    // messages in this file) -- the hint is a full sentence with its
+                    // own parenthetical example, and wrapping that in another layer of
+                    // parens produced an ugly, confusing "...).)" at the end.
+                    return "FAILED: " + detail + ". " + OciX509SessionManager.federationFailureHint(lastError[0]);
                 }
                 return testNamespaceWithSessionToken(p, s.token, s.sessionPrivateKey);
             }
@@ -375,7 +413,12 @@ public final class OciCrypto {
                     return "FAILED (RPST token load failed)";
                 }
 
-                return testNamespaceWithSessionToken(p, s.token, s.sessionPrivateKey);
+                // Namespace verification runs separately via sendNamespaceProbe()
+                // (Resource Principal isn't excluded in shouldNamespaceProbe(), unlike
+                // Instance Principal) -- probing here too would just be a second,
+                // redundant network round-trip to the same endpoint. Matches the
+                // Security Token branch below, which does the same thing.
+                return "OK (token length: " + s.token.length() + ")";
             }
 
             // Security Token (direct): validate token + private key without disk writes.
@@ -412,6 +455,24 @@ public final class OciCrypto {
 
     private static String tokenHash(String tokenOrPath) {
         return cachePart(OciTokenUtils.resolveTokenValue(tokenOrPath));
+    }
+
+    // Fingerprint changes whenever `oci session authenticate` generates a fresh key
+    // pair (the common case); the session-token-file's own content is hashed too in
+    // case only the token itself rotates without a new key pair. Cheap in the common
+    // case: OciConfigProfileResolver.resolve() only re-parses when the config file's
+    // own mtime changed, so this doesn't add a real file read on every signed request.
+    private static String configProfileContentHash(Profile p) {
+        try {
+            OciConfigProfileResolver.ResolvedConfig resolved = OciConfigProfileResolver.resolve(p);
+            ConfigFileReader.ConfigFile cfg = resolved.config;
+            String fingerprint = nz(cfg == null ? null : cfg.get("fingerprint"));
+            String tokenFile = nz(cfg == null ? null : cfg.get("security_token_file"));
+            String tokenPart = tokenFile.isBlank() ? "" : tokenHash(tokenFile);
+            return fingerprint + "|" + tokenPart;
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static String testNamespaceWithSessionToken(Profile p, String token, java.security.PrivateKey privateKey) {

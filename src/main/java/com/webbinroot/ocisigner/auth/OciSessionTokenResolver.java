@@ -66,7 +66,9 @@ public final class OciSessionTokenResolver {
         OciX509SessionManager.SessionInfo session =
                 OciX509SessionManager.getOrRefresh(p, infoLog, errorLog, forceRefresh);
         if (session == null || session.token == null || session.sessionPrivateKey == null) {
-            logError(errorLog, infoLog, "[OCI Signer] Session token unavailable (refresh failed)", null);
+            // getOrRefresh() already logged the specific reason (refresh failed, or a
+            // background refresh was just kicked off and hasn't landed yet).
+            logError(errorLog, infoLog, "[OCI Signer] Session token unavailable; request will go out unsigned.", null);
             return null;
         }
         return new Material(session.token, session.sessionPrivateKey);

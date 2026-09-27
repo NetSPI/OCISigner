@@ -2,6 +2,7 @@ package com.webbinroot.ocisigner.ui;
 
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.http.HttpService;
+import burp.api.montoya.http.RequestOptions;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import com.webbinroot.ocisigner.auth.OciConfigProfileResolver;
@@ -45,6 +46,7 @@ public final class ProfileConfigurationPanel {
 
     private final JButton testCredentials = new JButton("Test Credentials");
     private final JLabel testCredentialsStatus = new JLabel("");
+    private final JTextArea testCredentialsDetail = UiStyles.wrappingText(STATUS_FAIL);
     private static final String TEST_HEADER = OciRequestSigner.INTERNAL_TEST_HEADER;
     private static final Color STATUS_OK = new Color(0, 128, 0);
     private static final Color STATUS_FAIL = new Color(176, 0, 0);
@@ -73,6 +75,13 @@ public final class ProfileConfigurationPanel {
             applyToCurrentProfile();
             store.saveProfiles(); // prints to Burp output log for now
         });
+
+        // Region lives on this panel, not StaticCredentialsPanel -- contribute it to
+        // the shared dirty check so switching it back to the saved value also clears
+        // the "Unsaved changes" warning, same as the auth-type-specific fields.
+        staticCreds.setExternalDirtyCheck(() ->
+                currentProfile != null
+                        && !regionField.getText().trim().equals(currentProfile.region == null ? "" : currentProfile.region));
 
         GridBagConstraints c = new GridBagConstraints();
         c.insets = new Insets(4, 4, 4, 4);
@@ -126,13 +135,20 @@ public final class ProfileConfigurationPanel {
         testRow.add(testCredentialsStatus);
         root.add(testRow, c);
 
-        // Separator
+        // Failure detail (visible inline, not just in the status tooltip -- a one-line
+        // "Not Successful" with the actual reason hidden behind a hover is too easy to
+        // miss for something like a malformed Federation Endpoint).
         c.gridy = 5; c.gridx = 0; c.gridwidth = 4;
+        c.weightx = 1.0; c.fill = GridBagConstraints.HORIZONTAL;
+        root.add(testCredentialsDetail, c);
+
+        // Separator
+        c.gridy = 6; c.gridx = 0; c.gridwidth = 4;
         c.weightx = 1.0; c.fill = GridBagConstraints.HORIZONTAL;
         root.add(new JSeparator(), c);
 
         // Static creds panel
-        c.gridy = 6; c.gridx = 0; c.gridwidth = 4;
+        c.gridy = 7; c.gridx = 0; c.gridwidth = 4;
         c.weightx = 1.0; c.weighty = 1.0;
         c.fill = GridBagConstraints.BOTH;
         root.add(staticCreds.getRoot(), c);
@@ -162,12 +178,17 @@ public final class ProfileConfigurationPanel {
             // Resolve token file paths only when explicitly testing.
             // Region remains save-gated; unsaved region text does not affect tests.
             staticCreds.applyToProfile(currentProfile, true);
+            // Recompute dirty state: the auth-type fields now match currentProfile (same
+            // as a Save), though an unsaved region edit (not touched above) can still
+            // correctly leave the warning showing via the external dirty check.
+            staticCreds.markDirty();
 
             String validationError = validateInputs(currentProfile);
             if (validationError != null) {
                 statusLabel.setText("Status: Error");
                 testCredentialsStatus.setForeground(STATUS_FAIL);
                 testCredentialsStatus.setText(validationError);
+                setDetail(null);
                 logError("[OCI Signer][Test] " + validationError);
                 return;
             }
@@ -175,6 +196,7 @@ public final class ProfileConfigurationPanel {
             testCredentials.setEnabled(false);
             statusLabel.setText("Status: Testing...");
             testCredentialsStatus.setText("");
+            setDetail(null);
 
             SwingWorker<TestOutcome, Void> worker = new SwingWorker<>() {
                 @Override
@@ -203,28 +225,33 @@ public final class ProfileConfigurationPanel {
                             testCredentialsStatus.setForeground(STATUS_FAIL);
                             testCredentialsStatus.setText("Probe failed");
                             testCredentialsStatus.setToolTipText(result);
+                            setDetail(result);
                             statusLabel.setText("Status: Error");
                         } else if (ns != null) {
                             if (nsOk) {
                                 testCredentialsStatus.setForeground(STATUS_OK);
                                 testCredentialsStatus.setText("HTTP " + ns);
                                 testCredentialsStatus.setToolTipText(null);
+                                setDetail(null);
                                 statusLabel.setText("Status: OK");
                             } else {
                                 testCredentialsStatus.setForeground(STATUS_FAIL);
                                 testCredentialsStatus.setText("HTTP " + ns);
                                 testCredentialsStatus.setToolTipText(result);
+                                setDetail(result);
                                 statusLabel.setText("Status: Error");
                             }
                         } else if (ok) {
                             testCredentialsStatus.setForeground(STATUS_OK);
                             testCredentialsStatus.setText("OK");
                             testCredentialsStatus.setToolTipText(null);
+                            setDetail(null);
                             statusLabel.setText("Status: OK");
                         } else {
                             testCredentialsStatus.setForeground(STATUS_FAIL);
                             testCredentialsStatus.setText("Not Successful");
                             testCredentialsStatus.setToolTipText(result);
+                            setDetail(result);
                             statusLabel.setText("Status: Error");
                         }
 
@@ -237,6 +264,7 @@ public final class ProfileConfigurationPanel {
                         testCredentialsStatus.setForeground(STATUS_FAIL);
                         testCredentialsStatus.setText("Not Successful");
                         testCredentialsStatus.setToolTipText(ex.getMessage());
+                        setDetail(ex.getMessage());
                         logError("[OCI Signer][Test] Test failed: " + ex.getMessage());
                     } finally {
                         testCredentials.setEnabled(true);
@@ -279,6 +307,7 @@ public final class ProfileConfigurationPanel {
                 profileName.setText("");
                 statusLabel.setText("Status: —");
                 testCredentialsStatus.setText("");
+                setDetail(null);
                 inScopeOnly.setSelected(false);
                 updateTimestamp.setSelected(true);
                 onlyWithAuthHeader.setSelected(true);
@@ -292,6 +321,7 @@ public final class ProfileConfigurationPanel {
             profileName.setText(p.name());
             statusLabel.setText("Status: Ready");
             testCredentialsStatus.setText("");
+            setDetail(null);
 
             inScopeOnly.setSelected(p.onlyInScope);
             updateTimestamp.setSelected(p.updateTimestamp);
@@ -317,6 +347,15 @@ public final class ProfileConfigurationPanel {
     private void markStaticCredsDirty() {
         if (suppressDirty) return;
         staticCreds.markDirty();
+    }
+
+    /**
+     * Show the full Test Credentials failure reason inline, wrapped, instead of only
+     * in the status label's hover tooltip (easy to miss for something like a malformed
+     * Federation Endpoint). A single space keeps the row's height stable when empty.
+     */
+    private void setDetail(String text) {
+        testCredentialsDetail.setText((text == null || text.isBlank()) ? " " : text);
     }
 
     private void setEnabledAll(boolean enabled) {
@@ -442,7 +481,10 @@ public final class ProfileConfigurationPanel {
             } else {
                 OciDebug.log("[OCI Signer][Test] Namespace probe signed (auth len=" + auth.length() + ")");
             }
-            HttpRequestResponse resp = api.http().sendRequest(signed);
+            HttpRequestResponse resp = api.http().sendRequest(
+                    signed,
+                    RequestOptions.requestOptions().withUpstreamTLSVerification()
+            );
             if (resp != null && resp.hasResponse()) {
                 short status = resp.response().statusCode();
                 OciDebug.log("[OCI Signer][Test] Namespace probe status: HTTP " + status);

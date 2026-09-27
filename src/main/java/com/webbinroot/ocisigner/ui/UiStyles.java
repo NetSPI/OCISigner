@@ -32,6 +32,26 @@ public class UiStyles {
     }
 
     /**
+     * A read-only, word-wrapping, JLabel-like text display for multi-line status/error
+     * text. Plain JTextArea rather than HTML-in-JLabel: Burp's custom Look-and-Feel
+     * does not reliably render HTML markup inside JLabel (the raw tags/entities show up
+     * as literal text instead of being interpreted), so this avoids that entirely.
+     * Text wraps via JTextArea's own layout, not CSS/markup.
+     */
+    public static JTextArea wrappingText(Color foreground) {
+        JTextArea t = new JTextArea(" ");
+        t.setEditable(false);
+        t.setFocusable(false);
+        t.setOpaque(false);
+        t.setLineWrap(true);
+        t.setWrapStyleWord(true);
+        t.setRows(2);
+        t.setFont(UIManager.getFont("Label.font"));
+        t.setForeground(foreground);
+        return t;
+    }
+
+    /**
      * Open a single-file "Open" chooser and, if the user picks a file,
      * hand its absolute path to onPicked. No-op on cancel or no selection.
      */

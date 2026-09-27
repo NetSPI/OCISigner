@@ -37,8 +37,11 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -77,6 +80,19 @@ public final class OciX509SessionManager {
     private static final ConcurrentHashMap<String, SessionInfo> CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, HttpClient> HTTP_CLIENT_CACHE = new ConcurrentHashMap<>();
     private static final CopyOnWriteArrayList<BiConsumer<Profile, SessionInfo>> LISTENERS = new CopyOnWriteArrayList<>();
+    // Tracks cache keys with a background refresh already running, so a burst of
+    // concurrent live requests (e.g. a browser page load through Proxy) hitting an
+    // empty/expired cache at once triggers at most one federation call, not one per
+    // request. See REFRESH_EXECUTOR below.
+    private static final Set<String> REFRESH_IN_FLIGHT = ConcurrentHashMap.newKeySet();
+    // Runs getOrRefresh()'s best-effort (non-forced) token fetches off Burp's own
+    // request-handling thread, so a slow/stalled federation call can't hold up live
+    // traffic. Daemon threads: never a reason to keep the JVM alive on their own.
+    private static final ExecutorService REFRESH_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "ocisigner-x509-refresh");
+        t.setDaemon(true);
+        return t;
+    });
     // Package-private (not private): shared with OciRpstSessionManager, which
     // reuses this same SessionInfo type for RPST caching.
     static final long REFRESH_SKEW_SEC = 120;
@@ -90,6 +106,8 @@ public final class OciX509SessionManager {
     public static void clear() {
         CACHE.clear();
         LISTENERS.clear();
+        REFRESH_IN_FLIGHT.clear();
+        REFRESH_EXECUTOR.shutdownNow();
         for (HttpClient client : HTTP_CLIENT_CACHE.values()) {
             try {
                 client.close();
@@ -132,11 +150,39 @@ public final class OciX509SessionManager {
             cacheOnProfile(p, existing);
             return existing;
         }
-        SessionInfo refreshed = refresh(p, infoLog, errorLog);
-        if (refreshed != null) {
-            CACHE.put(key, refreshed);
+
+        if (forceRefresh) {
+            // Caller explicitly asked for a refresh and is waiting on the result
+            // (e.g. an already-backgrounded UI action) -- block for it here.
+            SessionInfo refreshed = refresh(p, infoLog, errorLog);
+            if (refreshed != null) {
+                CACHE.put(key, refreshed);
+            }
+            return refreshed;
         }
-        return refreshed;
+
+        // No valid cached token, and nobody explicitly asked to wait for one: this is
+        // reached from the live signing path (Burp's own request-handling thread), so
+        // a blocking federation call here would stall that request -- and any other
+        // request sharing that thread -- for up to requestSecurityToken()'s 30s
+        // timeout. Kick off at most one background refresh per cache key instead and
+        // return immediately with no token; this request goes out unsigned (logged),
+        // and a later request for the same profile picks up the cache once refresh()
+        // completes and populates it. REFRESH_IN_FLIGHT.add() is the dedup guard: if a
+        // burst of concurrent requests (e.g. a browser page load through Proxy) all
+        // land here while one refresh is already running, only the first starts one.
+        if (REFRESH_IN_FLIGHT.add(key)) {
+            REFRESH_EXECUTOR.submit(() -> {
+                try {
+                    refresh(p, infoLog, errorLog);
+                } finally {
+                    REFRESH_IN_FLIGHT.remove(key);
+                }
+            });
+        }
+        logInfo(infoLog, "[OCI Signer][X509] No cached session token yet; refreshing in the "
+                + "background. This request will go out unsigned -- retry once a token appears.");
+        return null;
     }
 
     /**
@@ -450,6 +496,36 @@ public final class OciX509SessionManager {
             com.webbinroot.ocisigner.util.OciDebug.logStack("[OCI Signer][Federation] Failed to init insecure SSL context", e);
             return null;
         }
+    }
+
+    // Public: shared between the Refresh Token button (StaticCredentialsPanel) and
+    // Test Credentials (OciCrypto) so a federation failure gets the right hint instead
+    // of always pointing at the endpoint -- a TLS/cert-trust failure (the common case
+    // when "Proxy federation request" is on but "Disable TLS verify" isn't) looks
+    // completely different from a malformed/unreachable endpoint and needs a different
+    // fix from the user.
+    // Strips the "[OCI Signer][X509] <description> :: " bookkeeping prefix that
+    // logError()/logErrorTo() adds for the debug log, where it disambiguates which
+    // log line is which among many. Inline UI messages don't need it -- the user is
+    // already looking at the specific action (Refresh Token, Test Credentials) that
+    // failed, so just the exception class/message is the useful part.
+    public static String stripInternalLogPrefix(String msg) {
+        if (msg == null) return "";
+        int idx = msg.indexOf(" :: ");
+        return (idx >= 0) ? msg.substring(idx + 4) : msg;
+    }
+
+    public static String federationFailureHint(String errorMessage) {
+        String msg = errorMessage == null ? "" : errorMessage;
+        if (msg.contains("SSLHandshakeException") || msg.contains("PKIX")
+                || msg.contains("certificate_unknown") || msg.contains("CertPathBuilderException")
+                || msg.contains("unable to find valid certification path")) {
+            return "This looks like a TLS/certificate trust failure, not a malformed endpoint. If "
+                    + "\"Proxy federation request\" is enabled, check \"Disable TLS verify (federation)\" "
+                    + "too, so the client doesn't reject Burp's own re-signed certificate.";
+        }
+        return "Double-check Federation Endpoint is a full URL in the form "
+                + "https://auth.<region>.oraclecloud.com (e.g. https://auth.us-phoenix-1.oraclecloud.com).";
     }
 
     // Package-private (not private): shared with OciCrypto (identical formula for

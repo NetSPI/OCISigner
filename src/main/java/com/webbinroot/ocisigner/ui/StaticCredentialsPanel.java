@@ -35,6 +35,7 @@ public final class StaticCredentialsPanel {
     private final JButton browseConfig = new JButton("Browse…");
 
     private final JLabel authTypeHint = new JLabel("");
+    private final JTextArea refreshTokenError = UiStyles.wrappingText(new Color(176, 0, 0));
 
     private static final String CARD_API_KEY = "API_KEY";
     private static final String CARD_SESSION = "SESSION";
@@ -302,13 +303,21 @@ public final class StaticCredentialsPanel {
         refreshInstanceToken.addActionListener(e -> {
             if (currentProfile == null) return;
             applyToProfile(currentProfile, false);
+            markDirty(); // recompute: the form now matches currentProfile, same as a Save
             Profile profileToRefresh = currentProfile;
 
             refreshInstanceToken.setEnabled(false);
+            refreshInstanceToken.setText("Refreshing…");
+            setRefreshTokenError(null);
+            String[] lastError = new String[1];
+            java.util.function.Consumer<String> errorLog = msg -> {
+                lastError[0] = msg;
+                OciDebug.log(msg);
+            };
             SwingWorker<OciX509SessionManager.SessionInfo, Void> worker = new SwingWorker<>() {
                 @Override
                 protected OciX509SessionManager.SessionInfo doInBackground() {
-                    return OciX509SessionManager.refresh(profileToRefresh, OciDebug::log, OciDebug::log);
+                    return OciX509SessionManager.refresh(profileToRefresh, OciDebug::log, errorLog);
                 }
 
                 @Override
@@ -318,10 +327,17 @@ public final class StaticCredentialsPanel {
                         updateInstanceTokenUi(profileToRefresh, s);
                         if (s != null && s.token != null) {
                             OciDebug.log("[OCI Signer] X509 token refreshed (len=" + s.token.length() + ")");
+                        } else {
+                            String reason = (lastError[0] == null) ? "Token refresh failed." :
+                                    OciX509SessionManager.stripInternalLogPrefix(lastError[0]);
+                            setRefreshTokenError(reason + " " + OciX509SessionManager.federationFailureHint(lastError[0]));
                         }
                     } catch (Exception ex) {
                         OciDebug.logStack("[OCI Signer] X509 token refresh failed", ex);
+                        String msg = "Token refresh failed: " + ex.getMessage();
+                        setRefreshTokenError(msg + " " + OciX509SessionManager.federationFailureHint(msg));
                     } finally {
+                        refreshInstanceToken.setText("Refresh Token");
                         refreshInstanceToken.setEnabled(true);
                     }
                 }
@@ -429,11 +445,23 @@ public final class StaticCredentialsPanel {
         privateKeyPassphrase.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
         configFile.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
         configProfile.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
-        instanceLeafCert.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
-        instanceLeafKey.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
+        instanceLeafCert.getDocument().addDocumentListener(SimpleDocListener.onChange(() -> {
+            markDirty();
+            setRefreshTokenError(null);
+        }));
+        instanceLeafKey.getDocument().addDocumentListener(SimpleDocListener.onChange(() -> {
+            markDirty();
+            setRefreshTokenError(null);
+        }));
         instanceLeafKeyPassphrase.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
-        instanceIntermediateCerts.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
-        instanceFederationEndpoint.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
+        instanceIntermediateCerts.getDocument().addDocumentListener(SimpleDocListener.onChange(() -> {
+            markDirty();
+            setRefreshTokenError(null);
+        }));
+        instanceFederationEndpoint.getDocument().addDocumentListener(SimpleDocListener.onChange(() -> {
+            markDirty();
+            setRefreshTokenError(null);
+        }));
         instanceTenancyOcid.getDocument().addDocumentListener(SimpleDocListener.onChange(this::markDirty));
         federationProxyEnabled.addActionListener(e -> markDirty());
         federationInsecureTls.addActionListener(e -> markDirty());
@@ -476,20 +504,98 @@ public final class StaticCredentialsPanel {
      */
     public void setOnSave(Runnable r) { this.onSave = r; }
 
+    private java.util.function.BooleanSupplier externalDirtyCheck;
+
     /**
-     * Mark the panel as having unsaved changes (shows warning).
+     * Let ProfileConfigurationPanel contribute its own fields (region) to the dirty
+     * check below, since it owns widgets this panel doesn't have access to.
+     */
+    public void setExternalDirtyCheck(java.util.function.BooleanSupplier check) {
+        this.externalDirtyCheck = check;
+    }
+
+    /**
+     * Recompute whether the form actually differs from the saved profile, and show/hide
+     * the "Unsaved changes" warning accordingly. Deliberately NOT a one-way latch: e.g.
+     * switching Auth Type away and back to the already-saved value, with no other edits,
+     * clears the warning again instead of leaving it stuck until Save.
+     *
+     * Only compares the auth type, signing mode, and whichever auth-type panel is
+     * currently selected -- the other panels' fields are inert while hidden, so there's
+     * no need to diff every field on Profile to answer "is there something to save".
      */
     public void markDirty() {
         if (suppressEvents) return;
-        if (!dirty) {
-            dirty = true;
-            unsavedLabel.setVisible(true);
-        }
+        boolean nowDirty = computeDirty() || (externalDirtyCheck != null && externalDirtyCheck.getAsBoolean());
+        dirty = nowDirty;
+        unsavedLabel.setVisible(nowDirty);
+    }
+
+    private boolean computeDirty() {
+        if (currentProfile == null) return false;
+
+        AuthType selected = (AuthType) authType.getSelectedItem();
+        if (selected == null) selected = AuthType.API_KEY;
+        if (selected != currentProfile.authType()) return true;
+
+        SigningMode sm = modeManual.isSelected() ? SigningMode.MANUAL : SigningMode.SDK;
+        if (sm != (currentProfile.signingMode == null ? SigningMode.SDK : currentProfile.signingMode)) return true;
+
+        return switch (selected) {
+            case API_KEY -> changed(tenancyOcid, currentProfile.tenancyOcid)
+                    || changed(userOcid, currentProfile.userOcid)
+                    || changed(fingerprint, currentProfile.fingerprint)
+                    || changed(privateKeyFile, currentProfile.privateKeyPath)
+                    || changed(privateKeyPassphrase, currentProfile.privateKeyPassphrase);
+            case CONFIG_PROFILE -> changed(configFile, currentProfile.configFilePath)
+                    || changed(configProfile, currentProfile.configProfileName);
+            case SECURITY_TOKEN -> !sessionTokenField.tokenValue().trim().equals(nz(currentProfile.sessionToken))
+                    || changed(sessionTenancyOcid, currentProfile.sessionTenancyOcid)
+                    || changed(sessionFingerprint, currentProfile.sessionFingerprint)
+                    || changed(sessionPrivateKeyFile, currentProfile.sessionPrivateKeyPath)
+                    || changed(sessionPrivateKeyPassphrase, currentProfile.sessionPrivateKeyPassphrase);
+            case INSTANCE_PRINCIPAL -> changed(instanceLeafCert, currentProfile.instanceX509LeafCert)
+                    || changed(instanceLeafKey, currentProfile.instanceX509LeafKey)
+                    || changed(instanceLeafKeyPassphrase, currentProfile.instanceX509LeafKeyPassphrase)
+                    || changed(instanceIntermediateCerts, currentProfile.instanceX509IntermediateCerts)
+                    || changed(instanceFederationEndpoint, currentProfile.instanceX509FederationEndpoint)
+                    || changed(instanceTenancyOcid, currentProfile.instanceX509TenancyOcid)
+                    || federationProxyEnabled.isSelected() != currentProfile.federationProxyEnabled
+                    || federationInsecureTls.isSelected() != currentProfile.federationInsecureTls
+                    || changed(federationProxyHost, currentProfile.federationProxyHost)
+                    || !federationProxyPort.getText().trim().equals(String.valueOf(currentProfile.federationProxyPort))
+                    || !instanceDelegationTokenField.tokenValue().trim().equals(nz(currentProfile.delegationToken));
+            case RESOURCE_PRINCIPAL -> !rpstTokenField.tokenValue().trim().equals(nz(currentProfile.resourcePrincipalRpst))
+                    || changed(rpPrivateKey, currentProfile.resourcePrincipalPrivateKey)
+                    || changed(rpPrivateKeyPassphrase, currentProfile.resourcePrincipalPrivateKeyPassphrase);
+        };
+    }
+
+    private static boolean changed(JTextField field, String saved) {
+        return !field.getText().trim().equals(nz(saved));
+    }
+
+    private static boolean changed(JPasswordField field, String saved) {
+        return !new String(field.getPassword()).equals(nz(saved));
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
     }
 
     private void clearDirty() {
         dirty = false;
         unsavedLabel.setVisible(false);
+    }
+
+    /**
+     * Show an Instance Principal federation failure inline (wrapped, persistent)
+     * instead of a modal popup. Cleared automatically once the user edits any of the
+     * fields the federation request is actually built from, rather than lingering
+     * until the next successful attempt.
+     */
+    private void setRefreshTokenError(String text) {
+        refreshTokenError.setText((text == null || text.isBlank()) ? " " : text);
     }
 
     /**
@@ -501,6 +607,7 @@ public final class StaticCredentialsPanel {
         try {
             this.currentProfile = p;
             clearDirty();
+            setRefreshTokenError(null);
 
             if (p == null) {
                 setEnabledAll(false);
@@ -794,6 +901,10 @@ public final class StaticCredentialsPanel {
         g.addLabelField("Intermediate Certs:", UiStyles.rowWithButton(instanceIntermediateCerts, addIntermediateCert));
 
         g.addLabelField("Federation Endpoint:", instanceFederationEndpoint);
+        JLabel federationEndpointHelp = new JLabel("Host only (we add /v1/x509). Example: https://auth.us-phoenix-1.oraclecloud.com");
+        federationEndpointHelp.setFont(federationEndpointHelp.getFont().deriveFont(Font.ITALIC));
+        g.addFullRow(federationEndpointHelp);
+        g.addFullRow(refreshTokenError);
 
         JPanel proxyRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         proxyRow.setOpaque(false);
@@ -931,7 +1042,7 @@ public final class StaticCredentialsPanel {
         } else if (isConfigProfile) {
             hint = "Config profile: auto-detects session token vs API key from the selected config profile.";
         } else if (isInstance) {
-            hint = "Instance principal: X.509 leaf cert/key + federation host only (we add /v1/x509). Example: https://auth.us-phoenix-1.oraclecloud.com";
+            hint = "Instance principal: X.509 leaf cert/key + federation host only (we add /v1/x509).";
         } else if (isResource) {
             hint = "Resource principal: provide RPST + private key.";
         }

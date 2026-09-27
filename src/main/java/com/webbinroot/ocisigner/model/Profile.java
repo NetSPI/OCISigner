@@ -14,55 +14,63 @@ public class Profile {
 
     private final String name;
 
+    // volatile: every field below is written from the EDT on Save (or, for the cached
+    // token fields, from the signing/federation-refresh path -- including the
+    // background refresh thread introduced for the token-refresh fix) and read from
+    // Burp's HTTP-handling thread on every live signing pass. Plain fields have no
+    // cross-thread visibility guarantee without this -- same reasoning as
+    // ProfileStore's fields. This closes the "reader never sees the update" case;
+    // it does not make a read of multiple fields atomic as a group (see project notes).
+
     // ----- Per-profile behavior -----
-    public boolean onlyInScope = false;
+    public volatile boolean onlyInScope = false;
 
     // If enabled, we set Date to "now" before signing (SDK path behavior)
-    public boolean updateTimestamp = true;
+    public volatile boolean updateTimestamp = true;
 
     // Optional helper inputs (used only for in-scope checks)
-    public String region = "";
+    public volatile String region = "";
 
     // If enabled, only sign requests that already include an Authorization header
-    public boolean onlyWithAuthHeader = true;
+    public volatile boolean onlyWithAuthHeader = true;
 
     // ----- Auth / signing -----
-    private AuthType authType = AuthType.API_KEY;
-    public SigningMode signingMode = SigningMode.SDK;
+    private volatile AuthType authType = AuthType.API_KEY;
+    public volatile SigningMode signingMode = SigningMode.SDK;
 
     // Session token auth (security token) uses OCI config file + profile.
     // Example CLI workflow writes security_token_file into config profile.
-    public String configFilePath = "~/.oci/config";
-    public String configProfileName = "DEFAULT";
+    public volatile String configFilePath = "~/.oci/config";
+    public volatile String configProfileName = "DEFAULT";
 
     // Session token (direct) inputs
-    public String sessionToken = ""; // token string or file path
-    public String sessionTenancyOcid = "";
-    public String sessionFingerprint = "";
-    public String sessionPrivateKeyPath = "";
-    public String sessionPrivateKeyPassphrase = "";
+    public volatile String sessionToken = ""; // token string or file path
+    public volatile String sessionTenancyOcid = "";
+    public volatile String sessionFingerprint = "";
+    public volatile String sessionPrivateKeyPath = "";
+    public volatile String sessionPrivateKeyPassphrase = "";
 
     // Instance principal X.509 inputs (optional, for non-IMDS environments)
-    public String instanceX509LeafCert = "";
-    public String instanceX509LeafKey = "";
-    public String instanceX509LeafKeyPassphrase = "";
-    public String instanceX509IntermediateCerts = "";
-    public String instanceX509FederationEndpoint = "";
-    public String instanceX509TenancyOcid = "";
-    public String federationProxyHost = "127.0.0.1";
-    public int federationProxyPort = 8080;
-    public boolean federationProxyEnabled = true;
-    public boolean federationInsecureTls = false;
+    public volatile String instanceX509LeafCert = "";
+    public volatile String instanceX509LeafKey = "";
+    public volatile String instanceX509LeafKeyPassphrase = "";
+    public volatile String instanceX509IntermediateCerts = "";
+    public volatile String instanceX509FederationEndpoint = "";
+    public volatile String instanceX509TenancyOcid = "";
+    public volatile String federationProxyHost = "127.0.0.1";
+    public volatile int federationProxyPort = 8080;
+    public volatile boolean federationProxyEnabled = true;
+    public volatile boolean federationInsecureTls = false;
 
     // Cached instance principal session token (in-memory only; not persisted/exported)
-    public String cachedSessionToken = "";
-    public long cachedSessionTokenExp = 0L;
-    public long cachedSessionTokenUpdatedAt = 0L;
+    public volatile String cachedSessionToken = "";
+    public volatile long cachedSessionTokenExp = 0L;
+    public volatile long cachedSessionTokenUpdatedAt = 0L;
 
     // Resource principal inputs (optional, for non-env environments)
-    public String resourcePrincipalRpst = "";
-    public String resourcePrincipalPrivateKey = "";
-    public String resourcePrincipalPrivateKeyPassphrase = "";
+    public volatile String resourcePrincipalRpst = "";
+    public volatile String resourcePrincipalPrivateKey = "";
+    public volatile String resourcePrincipalPrivateKeyPassphrase = "";
 
     // Delegation token (OBO) -- optional add-on for Instance Principal only (Oracle's
     // SDKs only ship a dedicated delegation signer for instance principals). Attached
@@ -71,17 +79,17 @@ public class Profile {
     // path (resolved via OciTokenUtils.resolveTokenValue, re-read on every sign -- so a
     // rotating token like Cloud Shell's /etc/oci/delegation_token is picked up
     // automatically).
-    public String delegationToken = "";
+    public volatile String delegationToken = "";
 
     // Static credentials
-    public String tenancyOcid;
-    public String userOcid;
-    public String fingerprint;
-    public String privateKeyPath;
-    public String privateKeyPassphrase; // currently not used by SDK signer
+    public volatile String tenancyOcid;
+    public volatile String userOcid;
+    public volatile String fingerprint;
+    public volatile String privateKeyPath;
+    public volatile String privateKeyPassphrase; // currently not used by SDK signer
 
     // Manual (custom) mode settings
-    public ManualSigningSettings manualSettings = new ManualSigningSettings();
+    public volatile ManualSigningSettings manualSettings = new ManualSigningSettings();
 
     public Profile(String name) {
         // Example input: "Prod"
