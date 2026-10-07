@@ -74,13 +74,13 @@ Requirements:
 | Dependency | Where Used | Purpose |
 |---|---|---|
 | `net.portswigger.burp.extensions:montoya-api:2026.7` | Burp extension entrypoint + UI panels + request hooks | Burp Suite extension API (UI, request handling, proxy integration). |
-| `org.bouncycastle:bcprov-jdk18on:1.85` | Key parsing + crypto primitives | PEM and RSA key handling for signing. |
-| `org.bouncycastle:bcpkix-jdk18on:1.85` | X.509 handling | Certificate parsing and chain handling for instance principal federation. |
-| `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.94.1` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
-| `tools.jackson.core:jackson-databind:3.2.1` | Token parsing + JWT helpers | JSON parsing for token responses and JWT claim extraction (Jackson 3; `jackson-annotations` stays on the legacy `com.fasterxml.jackson.core` group upstream). |
+| `org.bouncycastle:bcprov-jdk18on:1.86` | Key parsing + crypto primitives | PEM and RSA key handling for signing. |
+| `org.bouncycastle:bcpkix-jdk18on:1.86` | X.509 handling | Certificate parsing and chain handling for instance principal federation. |
+| `com.oracle.oci.sdk:oci-java-sdk-shaded-full:3.97.0` | SDK signing mode + config profile provider | Uses OCI SDK signing where feasible and reads OCI config profiles. |
+| `tools.jackson.core:jackson-databind:3.2.3` | Token parsing + JWT helpers | JSON parsing for token responses and JWT claim extraction (Jackson 3; `jackson-annotations` stays on the legacy `com.fasterxml.jackson.core` group upstream). |
 | `org.junit.jupiter:junit-jupiter:6.1.3`* | Unit tests only | JUnit 5 test framework (unit tests and assertions). |
-| `org.slf4j:slf4j-simple:2.0.18`* | Unit tests only | SLF4J binding to show logs during tests. |
-| `org.mockito:mockito-core:5.23.0`* | Unit tests only | Mocks Montoya's `HttpRequest` (its own factories require a live Burp instance) to test the request-signing entry point directly. |
+| `org.slf4j:slf4j-simple:2.0.20`* | Unit tests only | SLF4J binding to show logs during tests. |
+| `org.mockito:mockito-core:5.24.0`* | Unit tests only | Mocks Montoya's `HttpRequest` (its own factories require a live Burp instance) to test the request-signing entry point directly. |
 
 *Test-scoped dependency.
 
